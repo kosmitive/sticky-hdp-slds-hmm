@@ -14,9 +14,9 @@ theme:
     - content.code.copy
 
 nav:
+  - Results: results.md
   - Overview: index.md
   - Install and usage: install.md
-  - Results: results.md
   - API: api.md
   - Contributing: contributing.md
 

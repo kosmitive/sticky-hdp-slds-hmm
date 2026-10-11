@@ -1,6 +1,18 @@
 # Sticky HDP-SLDS
 
-Gibbs sampling for a sticky hierarchical Dirichlet process switching linear dynamical system, following Fox, Sudderth, Jordan, and Willsky, [Bayesian Nonparametric Inference of Switching Linear Dynamical Systems](https://arxiv.org/abs/1003.3829).
+Gibbs sampling for a sticky hierarchical Dirichlet process switching linear dynamical system, following Fox, Sudderth, Jordan, and Willsky, [Bayesian Nonparametric Inference of Switching Linear Dynamical Systems](https://arxiv.org/abs/1003.3829). The result below is an 80-step forecast of a noisy pendulum that the sampler never sees.
+
+## Forecast
+
+![Fitted window, 90% forecast band, and held-out observations for the largest release](docs/img/pendulum_forecast.png)
+
+![RMSE and 90% coverage against lead time](docs/img/pendulum_forecast_horizon.png)
+
+`examples/pendulum_forecast.py` fits the published series (seed 11, 300 sweeps) and scores 150 futures from sweeps 151–300. Pooled over four traces and both channels, the predictive mean has RMSE 0.148 on the first 10 steps and 1.456 over all 80. Repeating the last observation scores 1.446 and 3.032 on those same windows. The central 90% band covers 98.8% of the first 10 steps and 94.5% of the horizon.
+
+The 2.35 rad release does not hold that rate. Its 90% band covers 78.8% of the horizon and 42.5% of the last 20-step block.
+
+Documentation: [https://kosmitive.github.io/sticky-hdp-slds-hmm/](https://kosmitive.github.io/sticky-hdp-slds-hmm/).
 
 The sampler alternates between:
 
@@ -11,8 +23,6 @@ The sampler alternates between:
 - an inverse-Wishart update for the shared emission covariance
 
 `StickyHDPState` holds `alpha_plus_kappa`, `rho`, `gamma`, `beta`, and `pi`. `DynamicsState` holds `A`, `Sigma`, and the optional ARD precision `alpha`. `StickyHDPSLDSHMMModel.gibbs_step` runs one sweep in that order. Flags turn individual blocks off.
-
-Documentation: [https://kosmitive.github.io/sticky-hdp-slds-hmm/](https://kosmitive.github.io/sticky-hdp-slds-hmm/).
 
 ## Quick start
 
@@ -77,15 +87,9 @@ The last sample splits the swing into two sticky regimes. The mode whose mean ab
 uv run python examples/pendulum_forecast.py
 ```
 
-The forecast uses the same training series, seed, and hyperparameters as the fit above. Eighty further steps are integrated with continuation seed 12 and are never shown to the sampler. Sweeps 151–300 each contribute one future: the sweep’s sampled terminal state and mode, then modes from the sticky transition row, then latent states and observations. That is 150 predictive trajectories. The run took 107.6 s and reproduced the training chain (log joint 3076.00 at sweep 1 and 3495.25 at sweep 300).
+The forecast uses the same training series, seed, and hyperparameters as the fit above. Eighty further steps are integrated with continuation seed 12 and are never shown to the sampler. Sweeps 151–300 each contribute one future: the sweep’s sampled terminal state and mode, then modes from the sticky transition row, then latent states and observations. That is 150 predictive trajectories. The run took 107.6 s and reproduced the training chain (log joint 3076.00 at sweep 1 and 3495.25 at sweep 300). The headline scores and both figures are at the top of this page.
 
-Against the noisy holdout, pooled over all four traces and both channels, the predictive mean has RMSE 0.148 on the first 10 steps and 1.456 over the full 80. Repeating the last observation scores 1.446 and 3.032 on those same windows. The central 90% band covers 98.8% of the first 10 steps and 94.5% of the full horizon. Angle and angular velocity are close to that pooled rate (95.3% and 93.8%).
-
-The pool hides a split. The three smaller releases have holdout RMSE 0.539, 0.617, and 0.813, with coverage 99.4%, 100%, and 100%, so those bands are wider than the noise. The largest release, 2.35 rad, has RMSE 0.203 on the first 10 steps (coverage 100%) and RMSE 2.675 over the horizon (coverage 78.8%). In 20-step blocks its RMSE is 0.223, 1.516, 2.930, and 4.205, and the band coverage is 100%, 97.5%, 75%, and 42.5%. The last second of that swing leaves the band. The prior was not adjusted to the holdout.
-
-![Fitted window, 90% forecast band, and held-out observations for the largest release](docs/img/pendulum_forecast.png)
-
-![RMSE and 90% coverage against lead time](docs/img/pendulum_forecast_horizon.png)
+Angle and angular velocity coverage over the full horizon are 95.3% and 93.8%. The three smaller releases have holdout RMSE 0.539, 0.617, and 0.813, with coverage 99.4%, 100%, and 100%, so those bands are wider than the noise. The largest release, 2.35 rad, has RMSE 0.203 on the first 10 steps (coverage 100%) and RMSE 2.675 over the horizon (coverage 78.8%). In 20-step blocks its RMSE is 0.223, 1.516, 2.930, and 4.205, and the band coverage is 100%, 97.5%, 75%, and 42.5%. The last second of that swing leaves the band. The prior was not adjusted to the holdout.
 
 The chain mixes inside a band; it does not freeze. Two modes are what this prior and this truncation keep. The forecast on the 2.35 rad release is the case where a linear mode fitted on the observed swing does not carry the trajectory for the full extra horizon.
 

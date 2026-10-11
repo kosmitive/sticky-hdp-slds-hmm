@@ -1,5 +1,21 @@
 # Pendulum fit and forecast
 
+## Forecast
+
+```bash
+uv run python examples/pendulum_forecast.py
+```
+
+![Fitted window, 90% forecast band, and held-out observations for the largest release](img/pendulum_forecast.png)
+
+![RMSE and 90% coverage against lead time](img/pendulum_forecast_horizon.png)
+
+The forecast uses the same training series, seed, and hyperparameters as the fit below. Eighty further steps are integrated with continuation seed 12 and are never shown to the sampler. Sweeps 151–300 each contribute one future: the sweep's sampled terminal state and mode, then modes from the sticky transition row, then latent states and observations. That is 150 predictive trajectories. The run took 107.6 s and reproduced the training chain (log joint 3076.00 at sweep 1 and 3495.25 at sweep 300).
+
+Against the noisy holdout, pooled over all four traces and both channels, the predictive mean has RMSE 0.148 on the first 10 steps and 1.456 over the full 80. Repeating the last observation scores 1.446 and 3.032 on those same windows. The central 90% band covers 98.8% of the first 10 steps and 94.5% of the full horizon. Angle and angular velocity are close to that pooled rate (95.3% and 93.8%).
+
+The pool hides a split. The three smaller releases have holdout RMSE 0.539, 0.617, and 0.813, with coverage 99.4%, 100%, and 100%, so those bands are wider than the noise. The largest release, 2.35 rad, has RMSE 0.203 on the first 10 steps (coverage 100%) and RMSE 2.675 over the horizon (coverage 78.8%). In 20-step blocks its RMSE is 0.223, 1.516, 2.930, and 4.205, and the band coverage is 100%, 97.5%, 75%, and 42.5%. The last second of that swing leaves the band. The prior was not adjusted to the holdout.
+
 ## Fit
 
 ```bash
@@ -19,22 +35,6 @@ The last sample splits the swing into two sticky regimes. The mode whose mean ab
 ![Observed, noise-free, and posterior-mean angle and angular velocity](img/pendulum_reconstruction.png)
 
 ![Final mode sample against the noise-free angle](img/pendulum_modes.png)
-
-## Forecast
-
-```bash
-uv run python examples/pendulum_forecast.py
-```
-
-The forecast uses the same training series, seed, and hyperparameters as the fit above. Eighty further steps are integrated with continuation seed 12 and are never shown to the sampler. Sweeps 151–300 each contribute one future: the sweep's sampled terminal state and mode, then modes from the sticky transition row, then latent states and observations. That is 150 predictive trajectories. The run took 107.6 s and reproduced the training chain (log joint 3076.00 at sweep 1 and 3495.25 at sweep 300).
-
-Against the noisy holdout, pooled over all four traces and both channels, the predictive mean has RMSE 0.148 on the first 10 steps and 1.456 over the full 80. Repeating the last observation scores 1.446 and 3.032 on those same windows. The central 90% band covers 98.8% of the first 10 steps and 94.5% of the full horizon. Angle and angular velocity are close to that pooled rate (95.3% and 93.8%).
-
-The pool hides a split. The three smaller releases have holdout RMSE 0.539, 0.617, and 0.813, with coverage 99.4%, 100%, and 100%, so those bands are wider than the noise. The largest release, 2.35 rad, has RMSE 0.203 on the first 10 steps (coverage 100%) and RMSE 2.675 over the horizon (coverage 78.8%). In 20-step blocks its RMSE is 0.223, 1.516, 2.930, and 4.205, and the band coverage is 100%, 97.5%, 75%, and 42.5%. The last second of that swing leaves the band. The prior was not adjusted to the holdout.
-
-![Fitted window, 90% forecast band, and held-out observations for the largest release](img/pendulum_forecast.png)
-
-![RMSE and 90% coverage against lead time](img/pendulum_forecast_horizon.png)
 
 ## Limits
 

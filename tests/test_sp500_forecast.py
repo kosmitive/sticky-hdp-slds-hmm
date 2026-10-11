@@ -8,11 +8,13 @@ import numpy as np
 from examples.btc_forecast import _DATA_PATH as _BTC_PATH
 from examples.sp500_forecast import (
     _DATA_PATH,
+    annualized_vol_percent,
     ewma_variance_forecast,
     fit_and_forecast,
     fit_garch_student,
     forecast_metrics,
     load_closes,
+    raw_log_rv,
     rolling_rms,
     series_from_prices,
     volatility_baseline_paths,
@@ -95,6 +97,12 @@ def test_volatility_baselines_do_not_read_the_holdout_scale() -> None:
     assert np.all(np.isfinite(baselines["garch"]))
 
 
+def test_annualized_volatility_uses_sqrt_252() -> None:
+    log_rv = np.log(0.01)
+    assert np.isclose(float(annualized_vol_percent(log_rv)), 100.0 * 0.01 * np.sqrt(252.0))
+    assert np.allclose(raw_log_rv(np.array([1.0]), 0.5, 2.0), 2.5)
+
+
 def test_bitcoin_snapshot_parses_offline() -> None:
     text = _BTC_PATH.read_text()
     assert "downloaded: 2026-10-11" in text
@@ -110,10 +118,17 @@ def test_tiny_synthetic_forecast_is_finite() -> None:
     closes = 100.0 * np.exp(np.cumsum(shock))
     series = series_from_prices(_dates(closes.size), closes, holdout=8, window=5, seed=5)
     result = fit_and_forecast(series, sweeps=2)
-    metrics = forecast_metrics(result)
+    baselines = volatility_baseline_paths(series)
+    metrics = forecast_metrics(result, baselines)
     assert np.all(np.isfinite(result["log_joint"]))
     assert result["futures"].shape[0] == 1
     assert result["futures"].shape[2] == 8
     assert metrics["rmse_return_model"] >= 0.0
     assert metrics["rmse_vol_flat"] >= 0.0
-    assert 0.0 <= metrics["coverage_pooled"] <= 1.0
+    assert np.isfinite(metrics["rmse_log_vol_model_h1"])
+    assert np.isfinite(metrics["rmse_log_vol_flat_h5"])
+    assert np.isfinite(metrics["rmse_log_vol_ewma_h5"])
+    assert "rmse_log_vol_model_h20" not in metrics
+    assert 0.0 <= metrics["coverage_vol"] <= 1.0
+    assert 0.0 <= metrics["coverage_vol_h5"] <= 1.0
+    assert any(key.endswith("_ann_vol_pct") for key in metrics)

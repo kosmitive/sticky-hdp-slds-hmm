@@ -1,13 +1,15 @@
-"""Forecast a sticky HDP-SLDS on daily S&P 500 closes.
+"""Forecast 20-day realized volatility with a sticky HDP-SLDS.
 
 Prices are not the observations. A price level trends, so a linear mode
-would spend its capacity on that drift. The series used here is built from
-daily log returns ``r_t = log(P_t / P_{t-1})`` and from the log of a 20-day
-realized volatility. Realized volatility is the root mean square of the last
-20 log returns. Taking the log keeps that positive, heavy-tailed scale on a
-roughly symmetric axis. Both channels are then standardized with the mean
-and standard deviation of the training window only, so the holdout does not
-set the units.
+would spend its capacity on that drift. The target is the log of a 20-day
+realized volatility, the root mean square of the last 20 daily log returns
+``r_t = log(P_t / P_{t-1})``. The log keeps that positive scale roughly
+symmetric. Figures also show the same forecast as an annualized volatility
+in percent, ``100 * exp(log rv) * sqrt(252)``. The return is the second
+observation, not the quantity the forecast is judged on.
+
+Both channels are standardized with the training window only, so the
+holdout does not set the units.
 
 The snapshot ``examples/data/sp500_daily.csv`` is a Yahoo Finance ``^GSPC``
 daily close download. The script does not fetch anything. The last 250
@@ -49,6 +51,8 @@ TRUNCATION = 5
 VOL_WINDOW = 20
 HOLDOUT_DAYS = 250
 DEFAULT_SWEEPS = 300
+_LOG_VOL_HORIZONS = (1, 5, 20, 60)
+_ANNUALIZATION = float(np.sqrt(252.0))
 _DATA_PATH = Path(__file__).resolve().parent / "data" / "sp500_daily.csv"
 _IMG_DIR = _ROOT / "docs" / "img"
 _CONTEXT_DAYS = 250
@@ -512,6 +516,28 @@ def volatility_baseline_paths(series: dict[str, np.ndarray]) -> dict[str, np.nda
     }
 
 
+def raw_log_rv(standardized: np.ndarray, center: float, scale: float) -> np.ndarray:
+    """Undo training standardization of the log realized-volatility channel."""
+
+    return np.asarray(standardized, dtype=np.float64) * scale + center
+
+
+def annualized_vol_percent(log_rv: np.ndarray) -> np.ndarray:
+    """Map log 20-day RMS volatility to an annualized percent.
+
+    The 20-day root mean square is a daily volatility. Multiplying by
+    ``sqrt(252)`` is the usual trading-day annualization.
+
+    Args:
+        log_rv: Log of the 20-day root mean square of daily log returns.
+
+    Returns:
+        Annualized volatility in percent.
+    """
+
+    return 100.0 * np.exp(np.asarray(log_rv, dtype=np.float64)) * _ANNUALIZATION
+
+
 def _rmse(prediction: np.ndarray, target: np.ndarray) -> float:
     """Root mean square error over every element."""
 
@@ -522,13 +548,14 @@ def forecast_metrics(
     result: dict[str, np.ndarray],
     baselines: dict[str, np.ndarray] | None = None,
 ) -> dict[str, float]:
-    """Score returns against zero and last-value, and volatility against baselines.
+    """Score log realized volatility, and record the return forecast in passing.
 
-    The zero forecast is the training mean of standardized log returns.
-    The flat volatility forecast holds the last training 20-day value fixed.
-    When ``baselines`` is present, EWMA(0.94) and GARCH(1,1) Student-t are
-    scored on the same standardized log-volatility target. Scores from lead
-    20 onward drop the windows that still contain training returns.
+    Volatility RMSE is on the raw log of 20-day realized volatility, not the
+    standardized units. Horizons 1, 5, 20, and 60 are the RMSE of that path
+    through the first that many holdout days. One series means the 1-day
+    value is a single absolute error. The flat path holds the last training
+    20-day value fixed. EWMA uses decay 0.94. The return numbers are kept
+    so a reader can see that channel is close to unpredictable.
 
     Args:
         result: Output of :func:`fit_and_forecast`.
@@ -581,18 +608,45 @@ def forecast_metrics(
     overlap = min(int(result["window"]) - 1, vol_hold.size - 1)
     metrics["rmse_vol_model_after_overlap"] = _rmse(vol_hat[overlap:], vol_hold[overlap:])
     metrics["rmse_vol_flat_after_overlap"] = _rmse(flat_vol[overlap:], vol_hold[overlap:])
-    if baselines is None:
-        return metrics
-    for name in ("ewma", "garch"):
-        path = np.asarray(baselines[name], dtype=np.float64)
-        metrics[f"rmse_vol_{name}"] = _rmse(path, vol_hold)
-        metrics[f"rmse_vol_{name}_after_overlap"] = _rmse(path[overlap:], vol_hold[overlap:])
-    metrics["garch_omega"] = float(baselines["garch_omega"])
-    metrics["garch_alpha"] = float(baselines["garch_alpha"])
-    metrics["garch_beta"] = float(baselines["garch_beta"])
-    metrics["garch_nu"] = float(baselines["garch_nu"])
-    metrics["garch_persistence"] = float(baselines["garch_persistence"])
-    metrics["garch_success"] = float(baselines["garch_success"])
+    center = float(result["center"][1])
+    scale = float(result["scale"][1])
+    log_hold = raw_log_rv(vol_hold, center, scale)
+    log_paths = {
+        "model": raw_log_rv(vol_hat, center, scale),
+        "flat": raw_log_rv(flat_vol, center, scale),
+    }
+    if baselines is not None:
+        for name in ("ewma", "garch"):
+            path = np.asarray(baselines[name], dtype=np.float64)
+            metrics[f"rmse_vol_{name}"] = _rmse(path, vol_hold)
+            metrics[f"rmse_vol_{name}_after_overlap"] = _rmse(path[overlap:], vol_hold[overlap:])
+            log_paths[name] = raw_log_rv(path, center, scale)
+        metrics["garch_omega"] = float(baselines["garch_omega"])
+        metrics["garch_alpha"] = float(baselines["garch_alpha"])
+        metrics["garch_beta"] = float(baselines["garch_beta"])
+        metrics["garch_nu"] = float(baselines["garch_nu"])
+        metrics["garch_persistence"] = float(baselines["garch_persistence"])
+        metrics["garch_success"] = float(baselines["garch_success"])
+    for name, path in log_paths.items():
+        metrics[f"rmse_log_vol_{name}"] = _rmse(path, log_hold)
+        for horizon in _LOG_VOL_HORIZONS:
+            if horizon > log_hold.size:
+                continue
+            metrics[f"rmse_log_vol_{name}_h{horizon}"] = _rmse(path[:horizon], log_hold[:horizon])
+    for horizon in _LOG_VOL_HORIZONS:
+        if horizon > log_hold.size:
+            continue
+        metrics[f"coverage_vol_h{horizon}"] = float(np.mean(inside[0, :horizon, 1]))
+    # Labels are sorted by mean volatility, so the order is for display.
+    # The spread of these means is whether that draw separates regimes.
+    modes = result["modes_last"][0]
+    train_ann = annualized_vol_percent(
+        raw_log_rv(result["observations_train"][0, :, 1], center, scale)
+    )
+    for mode in np.unique(modes):
+        selected = modes == mode
+        metrics[f"mode_{int(mode)}_ann_vol_pct"] = float(np.mean(train_ann[selected]))
+        metrics[f"mode_{int(mode)}_share"] = float(np.mean(selected))
     return metrics
 
 
@@ -632,7 +686,8 @@ def save_plots(
     dates = result["dates_train"]
     modes = result["modes_last"][0]
     fig, axes = plt.subplots(2, 1, figsize=(8.4, 5.8), sharex=True)
-    axes[0].plot(dates, result["index_train"], color="#333333", lw=0.8)
+    axes[0].plot(dates, result["index_train"], color="#d0d0d0", lw=0.6)
+    axes[0].scatter(dates, result["index_train"], c=modes, cmap="viridis", s=3, linewidths=0)
     axes[0].set_ylabel(f"{asset_name} close")
     axes[1].step(dates, modes, where="post", color="#1f4e79", lw=0.8)
     axes[1].set_ylabel("mode, last sweep")
@@ -640,7 +695,7 @@ def save_plots(
     axes[1].set_ylim(-0.2, TRUNCATION - 0.8)
     axes[1].xaxis.set_major_locator(mdates.YearLocator(2))
     axes[1].xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
-    fig.suptitle("Last mode sample, labels ordered by mean volatility")
+    fig.suptitle("Last sweep, modes ordered from calm to turbulent")
     fig.tight_layout()
     fig.savefig(destination / f"{prefix}_modes.png", dpi=140)
     plt.close(fig)
@@ -652,101 +707,114 @@ def save_plots(
     context = min(_CONTEXT_DAYS, result["dates_train"].shape[0])
     train_dates = result["dates_train"][-context:]
     hold_dates = result["dates_hold"]
-    train_obs = result["observations_train"][0, -context:]
-    hold_obs = result["observations_hold"][0]
-    names = ("standardized log return", "standardized log 20-day volatility")
-    fig, axes = plt.subplots(2, 1, figsize=(8.4, 6.2), sharex=True)
-    for channel, name in enumerate(names):
-        axes[channel].plot(
-            train_dates, train_obs[:, channel], color="#9aa0a6", lw=0.8, label="fit window"
-        )
-        axes[channel].plot(
-            hold_dates, hold_obs[:, channel], color="#333333", lw=1.0, label="held out"
-        )
-        axes[channel].fill_between(
+    center = float(result["center"][1])
+    scale = float(result["scale"][1])
+    train_log = raw_log_rv(result["observations_train"][0, -context:, 1], center, scale)
+    hold_log = raw_log_rv(result["observations_hold"][0, :, 1], center, scale)
+    mean_log = raw_log_rv(predictive[:, 1], center, scale)
+    lower_log = raw_log_rv(lower[:, 1], center, scale)
+    upper_log = raw_log_rv(upper[:, 1], center, scale)
+    flat_log = raw_log_rv(baselines["flat"], center, scale)
+    ewma_log = raw_log_rv(baselines["ewma"], center, scale)
+    panels = (
+        (
+            "annualized volatility (%)",
+            annualized_vol_percent(train_log),
+            annualized_vol_percent(hold_log),
+            annualized_vol_percent(mean_log),
+            annualized_vol_percent(lower_log),
+            annualized_vol_percent(upper_log),
+            annualized_vol_percent(flat_log),
+            annualized_vol_percent(ewma_log),
+        ),
+        (
+            "log 20-day realized volatility",
+            train_log,
+            hold_log,
+            mean_log,
+            lower_log,
+            upper_log,
+            flat_log,
+            ewma_log,
+        ),
+    )
+    fig, axes = plt.subplots(2, 1, figsize=(8.4, 6.4), sharex=True)
+    for axis, panel in zip(axes, panels, strict=True):
+        name, train, hold, mean, band_low, band_high, flat, ewma = panel
+        axis.plot(train_dates, train, color="#9aa0a6", lw=0.8, label="fit window")
+        axis.plot(hold_dates, hold, color="#333333", lw=1.1, label="realized holdout")
+        axis.fill_between(
             hold_dates,
-            lower[:, channel],
-            upper[:, channel],
+            band_low,
+            band_high,
             color="#1f4e79",
             alpha=0.22,
             label="90% predictive band",
         )
-        axes[channel].plot(
-            hold_dates, predictive[:, channel], color="#1f4e79", lw=1.3, label="predictive mean"
-        )
-        if channel == 1:
-            axes[channel].plot(
-                hold_dates, baselines["flat"], color="#666666", lw=1.0, ls=":", label="trailing vol"
-            )
-            axes[channel].plot(
-                hold_dates, baselines["ewma"], color="#F58518", lw=1.0, ls="--", label="EWMA 0.94"
-            )
-            axes[channel].plot(
-                hold_dates, baselines["garch"], color="#E45756", lw=1.0, ls="-.", label="GARCH-t"
-            )
-        axes[channel].axvline(hold_dates[0], color="#888888", lw=0.8)
-        axes[channel].set_ylabel(name)
+        axis.plot(hold_dates, mean, color="#1f4e79", lw=1.3, label="predictive mean")
+        axis.plot(hold_dates, flat, color="#666666", lw=1.0, ls=":", label="trailing 20-day")
+        axis.plot(hold_dates, ewma, color="#F58518", lw=1.1, ls="--", label="EWMA 0.94")
+        axis.axvline(hold_dates[0], color="#888888", lw=0.8)
+        axis.set_ylabel(name)
     axes[0].legend(loc="upper right", frameon=False, ncol=2, fontsize=8)
-    axes[1].legend(loc="upper right", frameon=False, ncol=2, fontsize=8)
     axes[1].set_xlabel("date")
     axes[1].xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
-    fig.suptitle(f"250-day holdout forecast for {asset_name}")
+    fig.suptitle(f"{asset_name} volatility forecast, 250-day holdout")
     fig.tight_layout()
     fig.savefig(destination / f"{prefix}_forecast.png", dpi=140)
     plt.close(fig)
 
-    lead = np.arange(1, hold_obs.shape[0] + 1)
+    lead = np.arange(1, hold_log.size + 1)
     count = lead.astype(np.float64)
 
     def expanding_rmse(error: np.ndarray) -> np.ndarray:
         return np.sqrt(np.cumsum(error**2) / count)
 
-    ret_err = predictive[:, 0] - hold_obs[:, 0]
-    zero_err = 0.0 - hold_obs[:, 0]
-    last_ret = float(result["observations_train"][0, -1, 0])
-    last_err = last_ret - hold_obs[:, 0]
-    flat = float(result["observations_train"][0, -1, 1])
-    vol_err = predictive[:, 1] - hold_obs[:, 1]
-    flat_err = flat - hold_obs[:, 1]
-    inside = (hold_obs >= lower) & (hold_obs <= upper)
+    inside_vol = (hold_log >= lower_log) & (hold_log <= upper_log)
     # One series makes a single-day coverage bit a barcode. A 20-day
     # trailing fraction is the same indicator, smoothed. The prefix is
     # the expanding fraction until the window is full.
-    window = min(20, hold_obs.shape[0])
-    ret_cover = np.cumsum(inside[:, 0]) / count
-    vol_cover = np.cumsum(inside[:, 1]) / count
-    if hold_obs.shape[0] >= window:
+    window = min(20, hold_log.size)
+    vol_cover = np.cumsum(inside_vol.astype(np.float64)) / count
+    if hold_log.size >= window:
         kernel = np.ones(window) / float(window)
-        ret_cover[window - 1 :] = np.convolve(inside[:, 0].astype(np.float64), kernel, mode="valid")
-        vol_cover[window - 1 :] = np.convolve(inside[:, 1].astype(np.float64), kernel, mode="valid")
+        vol_cover[window - 1 :] = np.convolve(inside_vol.astype(np.float64), kernel, mode="valid")
     fig, axes = plt.subplots(2, 1, figsize=(8.4, 5.6), sharex=True)
-    axes[0].plot(lead, expanding_rmse(ret_err), color="#1f4e79", lw=1.3, label="model return")
     axes[0].plot(
-        lead, expanding_rmse(zero_err), color="#666666", lw=1.1, ls=":", label="zero return"
+        lead,
+        expanding_rmse(mean_log - hold_log),
+        color="#1f4e79",
+        lw=1.4,
+        label="model",
     )
     axes[0].plot(
-        lead, expanding_rmse(last_err), color="#b85c38", lw=1.0, ls="--", label="last return"
+        lead,
+        expanding_rmse(flat_log - hold_log),
+        color="#666666",
+        lw=1.1,
+        ls=":",
+        label="trailing 20-day",
     )
-    axes[0].plot(lead, expanding_rmse(vol_err), color="#54A24B", lw=1.3, label="model volatility")
     axes[0].plot(
-        lead, expanding_rmse(flat_err), color="#666666", lw=1.0, ls=":", label="trailing volatility"
+        lead,
+        expanding_rmse(ewma_log - hold_log),
+        color="#F58518",
+        lw=1.1,
+        ls="--",
+        label="EWMA 0.94",
     )
-    ewma_err = np.asarray(baselines["ewma"], dtype=np.float64) - hold_obs[:, 1]
-    garch_err = np.asarray(baselines["garch"], dtype=np.float64) - hold_obs[:, 1]
-    axes[0].plot(
-        lead, expanding_rmse(ewma_err), color="#F58518", lw=1.0, ls="--", label="EWMA 0.94"
-    )
-    axes[0].plot(lead, expanding_rmse(garch_err), color="#E45756", lw=1.0, ls="-.", label="GARCH-t")
-    axes[0].set_ylabel("RMSE through this lead")
-    axes[0].legend(frameon=False, fontsize=8, ncol=2)
-    axes[1].plot(lead, ret_cover, color="#1f4e79", lw=1.2, label="return, 20-day coverage")
-    axes[1].plot(lead, vol_cover, color="#54A24B", lw=1.2, label="volatility, 20-day coverage")
+    for horizon in _LOG_VOL_HORIZONS:
+        if horizon <= hold_log.size:
+            axes[0].axvline(horizon, color="#cccccc", lw=0.7)
+    axes[0].set_ylabel("RMSE of log volatility")
+    axes[0].legend(frameon=False, fontsize=8)
+    axes[1].plot(lead, vol_cover, color="#1f4e79", lw=1.2, label="volatility, 20-day coverage")
     axes[1].axhline(0.90, color="#888888", lw=0.8, ls="--")
     axes[1].set_ylabel("fraction in 90% band")
-    axes[1].set_xlabel("lead time (trading days)")
+    axes[1].set_xlabel("lead time (days)")
     axes[1].set_ylim(0.0, 1.05)
     axes[1].legend(frameon=False, fontsize=8)
-    fig.suptitle("Holdout score by lead time, one series")
+    fig.suptitle("Log-volatility RMSE through each lead, one series")
     fig.tight_layout()
     fig.savefig(destination / f"{prefix}_forecast_horizon.png", dpi=140)
     plt.close(fig)

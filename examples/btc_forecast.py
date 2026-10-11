@@ -1,11 +1,12 @@
-"""Forecast the sticky HDP-SLDS on daily Bitcoin closes.
+"""Forecast Bitcoin's 20-day realized volatility with a sticky HDP-SLDS.
 
-The transform matches the S&P 500 example: daily log returns and the log of
-20-day realized volatility, standardized on the training window only. The
-snapshot is Yahoo Finance ``BTC-USD``. Stooq's daily file was behind a
-browser check on the download date, so it is not the source. Priors are the
-same weakly informative settings as the equity run and were not tuned on
-the holdout. Bitcoin trades every day, so the sample includes weekends.
+The target matches the S&P 500 example: log 20-day realized volatility,
+with the daily log return kept as the second observation. Both channels
+are standardized on the training window only. The snapshot is Yahoo
+Finance ``BTC-USD``. Stooq's daily file was behind a browser check on the
+download date, so it is not the source. Priors are the same weakly
+informative settings as the equity run and were not tuned on the holdout.
+Bitcoin trades every day, so the sample includes weekends.
 
     python examples/btc_forecast.py
     python examples/btc_forecast.py 40

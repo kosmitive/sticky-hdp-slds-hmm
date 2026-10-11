@@ -40,8 +40,8 @@ uv run python examples/btc_forecast.py
 | `examples/smoke_slds.py` | Short end-to-end run |
 | `examples/pendulum_demo.py` | Noisy pendulum fit |
 | `examples/pendulum_forecast.py` | 80-step forecast from that fit |
-| `examples/sp500_forecast.py` | S&P 500 return and volatility forecast |
-| `examples/btc_forecast.py` | Bitcoin return and volatility forecast |
+| `examples/sp500_forecast.py` | S&P 500 volatility forecast |
+| `examples/btc_forecast.py` | Bitcoin volatility forecast |
 | `examples/data/` | Close snapshots used by those two scripts |
 | `tests/` | Regression tests for the sampler |
 

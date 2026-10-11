@@ -22,8 +22,8 @@ The smoke script builds a two-mode system in two latent dimensions, simulates tw
 ```bash
 uv run python examples/pendulum_demo.py
 uv run python examples/pendulum_forecast.py
-uv run python examples/sp500_forecast.py
-uv run python examples/btc_forecast.py
+uv run python examples/volatility_forecast.py sp500
+uv run python examples/volatility_forecast.py btc
 ```
 
 `pendulum_demo.py` accepts a sweep count as its only argument. The default is 300. The forecast script uses that same default and does not read the holdout while fitting.
@@ -40,8 +40,9 @@ uv run python examples/btc_forecast.py
 | `examples/smoke_slds.py` | Short end-to-end run |
 | `examples/pendulum_demo.py` | Noisy pendulum fit |
 | `examples/pendulum_forecast.py` | 80-step forecast from that fit |
-| `examples/sp500_forecast.py` | S&P 500 volatility forecast |
-| `examples/btc_forecast.py` | Bitcoin volatility forecast |
+| `examples/volatility_forecast.py` | S&P 500 or Bitcoin volatility forecast |
+| `examples/sp500_forecast.py` | S&P 500 entry point for that script |
+| `examples/btc_forecast.py` | Bitcoin entry point, 30-day window |
 | `examples/data/` | Close snapshots used by those two scripts |
 | `tests/` | Regression tests for the sampler |
 

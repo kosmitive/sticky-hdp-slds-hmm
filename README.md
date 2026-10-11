@@ -16,7 +16,9 @@ The 2.35 rad release does not hold that rate. Its 90% band covers 78.8% of the h
 
 ![S&P 500 annualized and log 20-day realized volatility, 90% band, and the holdout](docs/img/sp500_forecast.png)
 
-`examples/sp500_forecast.py` and `examples/btc_forecast.py` forecast log 20-day realized volatility. The return is the second observation. The last 250 days are held out, and nothing was fit to them. The baselines are the last 20-day value held flat, EWMA with decay 0.94, and a GARCH(1,1) Student-t fit with `arch` on the training returns. The GARCH variance forecast is converted to the same log root-mean-square target. The table is RMSE of that log volatility. The lowest value on each row is the winner.
+`examples/volatility_forecast.py` forecasts log realized volatility for one daily dataset. The return is the second observation. Nothing is fit to the holdout. The baselines are the last realized-volatility window held flat, EWMA with decay 0.94, and a GARCH(1,1) Student-t fit with `arch` on the training returns. GARCH is converted with that same window: 20 trading days for the S&P 500, 30 calendar days for bitcoin. The table is RMSE of log volatility. The lowest value on each row is the winner.
+
+The S&P 500 holds out the last 250 trading days. Bitcoin trades every day, so the series is a 7-day calendar, the window is 30 days, annualization is `sqrt(365)`, and the holdout is the last 365 days.
 
 S&P 500:
 
@@ -30,19 +32,19 @@ S&P 500:
 
 GARCH wins day 1. EWMA wins every longer lead. Both 90% bands cover the whole holdout, so those bands are wide.
 
-Bitcoin:
+Bitcoin, log 30-day realized volatility. Leads 1, 5, and 20 still contain known returns. Lead 60 does not.
 
 | Lead (days) | SLDS | Trailing | EWMA 0.94 | GARCH-t |
 | --- | ---: | ---: | ---: | ---: |
-| 1 | 0.037 | 0.035 | 0.018 | 0.004 |
-| 5 | 0.539 | 0.553 | 0.490 | 0.451 |
-| 20 | 0.589 | 0.608 | 0.527 | 0.396 |
-| 60 | 0.369 | 0.374 | 0.330 | 0.463 |
-| 250 | 0.472 | 0.428 | 0.418 | 1.086 |
+| 1 | 0.047 | 0.055 | 0.034 | 0.019 |
+| 5 | 0.047 | 0.073 | 0.016 | 0.042 |
+| 20 | 0.042 | 0.096 | 0.079 | 0.217 |
+| 60 | 0.070 | 0.143 | 0.091 | 0.407 |
+| 365 | 0.404 | 0.298 | 0.314 | 1.112 |
 
-GARCH wins leads 1, 5, and 20. EWMA wins lead 60 and the full 250 days, where GARCH is the worst of the four. The SLDS 90% band covers 79.2% of that holdout. The GARCH band covers 94.0%.
+GARCH wins day 1. EWMA wins lead 5. The SLDS wins leads 20 and 60. The trailing 30-day value wins the full 365 days, and GARCH is the worst there. The SLDS 90% band covers 78.4% of that holdout. The GARCH band covers 98.4%, which is a wide band next to its RMSE of 1.112.
 
-The return forecast is close to unpredictable: 0.667 against 0.661 for predicting zero on the S&P 500, and 0.685 against 0.680 on bitcoin. The conversion, the bands, and the mode split are on the [volatility page](https://kosmitive.github.io/sticky-hdp-slds-hmm/volatility/).
+The return forecast is close to unpredictable: 0.667 against 0.661 for predicting zero on the S&P 500, and 0.661 against 0.656 on bitcoin. The conversion, the bands, and the mode split are on the [volatility page](https://kosmitive.github.io/sticky-hdp-slds-hmm/volatility/).
 
 Documentation: [https://kosmitive.github.io/sticky-hdp-slds-hmm/](https://kosmitive.github.io/sticky-hdp-slds-hmm/).
 
@@ -88,8 +90,9 @@ The smoke script builds a two-mode system in two latent dimensions, simulates tw
 | `examples/smoke_slds.py` | Short end-to-end run |
 | `examples/pendulum_demo.py` | Noisy pendulum, with the figures below |
 | `examples/pendulum_forecast.py` | 80-step forecast from that fit |
-| `examples/sp500_forecast.py` | S&P 500 volatility forecast |
-| `examples/btc_forecast.py` | Bitcoin volatility forecast |
+| `examples/volatility_forecast.py` | S&P 500 or Bitcoin volatility forecast |
+| `examples/sp500_forecast.py` | S&P 500 entry point |
+| `examples/btc_forecast.py` | Bitcoin entry point, 30-day window |
 | `tests/` | Regression tests for the sampler |
 | `docs/` | This site's source |
 

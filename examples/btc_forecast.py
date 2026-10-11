@@ -1,15 +1,17 @@
-"""Forecast Bitcoin's 20-day realized volatility with a sticky HDP-SLDS.
+"""Forecast Bitcoin's 30-day realized volatility with a sticky HDP-SLDS.
 
-The target matches the S&P 500 example: log 20-day realized volatility,
-with the daily log return kept as the second observation. Both channels
-are standardized on the training window only. The snapshot is Yahoo
-Finance ``BTC-USD``. Stooq's daily file was behind a browser check on the
-download date, so it is not the source. Priors are the same weakly
-informative settings as the equity run and were not tuned on the holdout.
-Bitcoin trades every day, so the sample includes weekends.
+Bitcoin trades every calendar day, so the log returns are on a 7-day
+calendar. The target is the log of a 30-day root mean square, annualized
+with ``sqrt(365)``. The last 365 days are held out. The return is the
+second observation. Priors match the S&P 500 run and were not tuned on
+the holdout.
+
+The snapshot is the committed Yahoo Finance ``BTC-USD`` daily close.
+A fresh download was not available: Yahoo answered 429 and Stooq answered
+with a browser check. The script does not fetch anything.
 
     python examples/btc_forecast.py
-    python examples/btc_forecast.py 40
+    python examples/volatility_forecast.py btc
 """
 
 from __future__ import annotations
@@ -21,16 +23,18 @@ _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from examples.sp500_forecast import DEFAULT_SWEEPS, run_forecast
+from examples.sp500_forecast import DEFAULT_SWEEPS
+from examples.volatility_forecast import _BTC_PATH as _DATA_PATH
+from examples.volatility_forecast import run_dataset
 
-_DATA_PATH = Path(__file__).resolve().parent / "data" / "btc_daily.csv"
+__all__ = ["_DATA_PATH"]
 
 
 def main() -> None:
-    """Fit the committed Bitcoin snapshot and score the 250-day holdout."""
+    """Fit the committed Bitcoin snapshot and score the 365-day holdout."""
 
     sweeps = int(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_SWEEPS
-    run_forecast(_DATA_PATH, "btc", "Bitcoin", sweeps)
+    run_dataset("btc", sweeps)
 
 
 if __name__ == "__main__":

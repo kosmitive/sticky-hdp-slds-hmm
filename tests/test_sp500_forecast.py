@@ -166,7 +166,36 @@ def test_volatility_baselines_do_not_read_the_holdout_scale() -> None:
 def test_annualized_volatility_uses_sqrt_252() -> None:
     log_rv = np.log(0.01)
     assert np.isclose(float(annualized_vol_percent(log_rv)), 100.0 * 0.01 * np.sqrt(252.0))
+    assert np.isclose(
+        float(annualized_vol_percent(log_rv, days=365)), 100.0 * 0.01 * np.sqrt(365.0)
+    )
     assert np.allclose(raw_log_rv(np.array([1.0]), 0.5, 2.0), 2.5)
+
+
+def test_bitcoin_snapshot_is_a_daily_calendar() -> None:
+    from examples.volatility_forecast import DATASETS
+
+    spec = DATASETS["btc"]
+    assert spec["window"] == 30
+    assert spec["holdout"] == 365
+    assert spec["annualization_days"] == 365
+    snapshot = load_closes(_BTC_PATH)
+    ordinals = np.array([day.toordinal() for day in snapshot["dates"]])
+    assert np.all(np.diff(ordinals) == 1)
+    series = series_from_prices(
+        snapshot["dates"],
+        snapshot["closes"],
+        holdout=365,
+        window=30,
+        annualization_days=365,
+    )
+    assert series["observations_hold"].shape[1] == 365
+    assert int(series["window"]) == 30
+    center = float(series["center"][1])
+    scale = float(series["scale"][1])
+    raw_last = float(series["observations_hold"][0, -1, 1]) * scale + center
+    rms = np.sqrt(np.mean(np.asarray(series["returns"][-30:]) ** 2))
+    assert np.isclose(raw_last, np.log(rms))
 
 
 def test_bitcoin_snapshot_parses_offline() -> None:

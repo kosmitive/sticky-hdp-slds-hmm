@@ -52,7 +52,6 @@ VOL_WINDOW = 20
 HOLDOUT_DAYS = 250
 DEFAULT_SWEEPS = 300
 _LOG_VOL_HORIZONS = (1, 5, 20, 60)
-_ANNUALIZATION = float(np.sqrt(252.0))
 _GARCH_SIMULATIONS = 2000
 _GARCH_SEED = 23
 _DATA_PATH = Path(__file__).resolve().parent / "data" / "sp500_daily.csv"
@@ -123,6 +122,7 @@ def series_from_prices(
     holdout: int = HOLDOUT_DAYS,
     window: int = VOL_WINDOW,
     seed: int = SEED,
+    annualization_days: int = 252,
 ) -> dict[str, np.ndarray]:
     """Build standardized return and log-volatility observations.
 
@@ -137,6 +137,8 @@ def series_from_prices(
         window: Realized-volatility window.
         seed: Seed recorded for the Gibbs sampler. The transform itself
             does not draw random numbers.
+        annualization_days: Stored for the percent-volatility figure.
+            It does not change the observations.
 
     Returns:
         Training and holdout arrays of shape ``(1, steps, 2)``, the index
@@ -178,6 +180,7 @@ def series_from_prices(
         "seed": np.array(seed),
         "returns": returns,
         "window": np.array(window),
+        "annualization_days": np.array(annualization_days),
     }
 
 
@@ -321,6 +324,7 @@ def fit_and_forecast(series: dict[str, np.ndarray], sweeps: int) -> dict[str, np
         "center": series["center"],
         "scale": series["scale"],
         "window": series["window"],
+        "annualization_days": series["annualization_days"],
     }
 
 
@@ -701,20 +705,21 @@ def raw_log_rv(standardized: np.ndarray, center: float, scale: float) -> np.ndar
     return np.asarray(standardized, dtype=np.float64) * scale + center
 
 
-def annualized_vol_percent(log_rv: np.ndarray) -> np.ndarray:
-    """Map log 20-day RMS volatility to an annualized percent.
+def annualized_vol_percent(log_rv: np.ndarray, days: int = 252) -> np.ndarray:
+    """Map log RMS volatility to an annualized percent.
 
-    The 20-day root mean square is a daily volatility. Multiplying by
-    ``sqrt(252)`` is the usual trading-day annualization.
+    The root mean square is a one-day volatility. ``days`` is 252 for a
+    trading-day series and 365 for a calendar-day series.
 
     Args:
-        log_rv: Log of the 20-day root mean square of daily log returns.
+        log_rv: Log of the root mean square of daily log returns.
+        days: Days in the year used for annualization.
 
     Returns:
-        Annualized volatility in percent.
+        Annualized volatility in percent, ``100 * exp(log_rv) * sqrt(days)``.
     """
 
-    return 100.0 * np.exp(np.asarray(log_rv, dtype=np.float64)) * _ANNUALIZATION
+    return 100.0 * np.exp(np.asarray(log_rv, dtype=np.float64)) * float(np.sqrt(days))
 
 
 def _rmse(prediction: np.ndarray, target: np.ndarray) -> float:
@@ -907,22 +912,28 @@ def save_plots(
     garch_log = raw_log_rv(baselines["garch"], center, scale)
     garch_lo = raw_log_rv(baselines["garch_lower"], center, scale)
     garch_hi = raw_log_rv(baselines["garch_upper"], center, scale)
+    vol_window = int(result["window"])
+    ann_days = int(result["annualization_days"])
+
+    def _ann(values: np.ndarray) -> np.ndarray:
+        return annualized_vol_percent(values, ann_days)
+
     panels = (
         (
             "annualized volatility (%)",
-            annualized_vol_percent(train_log),
-            annualized_vol_percent(hold_log),
-            annualized_vol_percent(mean_log),
-            annualized_vol_percent(lower_log),
-            annualized_vol_percent(upper_log),
-            annualized_vol_percent(flat_log),
-            annualized_vol_percent(ewma_log),
-            annualized_vol_percent(garch_log),
-            annualized_vol_percent(garch_lo),
-            annualized_vol_percent(garch_hi),
+            _ann(train_log),
+            _ann(hold_log),
+            _ann(mean_log),
+            _ann(lower_log),
+            _ann(upper_log),
+            _ann(flat_log),
+            _ann(ewma_log),
+            _ann(garch_log),
+            _ann(garch_lo),
+            _ann(garch_hi),
         ),
         (
-            "log 20-day realized volatility",
+            f"log {vol_window}-day realized volatility",
             train_log,
             hold_log,
             mean_log,
@@ -971,14 +982,16 @@ def save_plots(
             label="GARCH 90% band",
         )
         axis.plot(hold_dates, garch, color="#E45756", lw=1.1, ls="-.", label="GARCH-t")
-        axis.plot(hold_dates, flat, color="#666666", lw=1.0, ls=":", label="trailing 20-day")
+        axis.plot(
+            hold_dates, flat, color="#666666", lw=1.0, ls=":", label=f"trailing {vol_window}-day"
+        )
         axis.plot(hold_dates, ewma, color="#F58518", lw=1.1, ls="--", label="EWMA 0.94")
         axis.axvline(hold_dates[0], color="#888888", lw=0.8)
         axis.set_ylabel(name)
     axes[0].legend(loc="upper left", frameon=False, ncol=2, fontsize=7)
     axes[1].set_xlabel("date")
     axes[1].xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
-    fig.suptitle(f"{asset_name} volatility forecast, 250-day holdout")
+    fig.suptitle(f"{asset_name} volatility forecast, {hold_dates.size}-day holdout")
     fig.tight_layout()
     fig.savefig(destination / f"{prefix}_forecast.png", dpi=140)
     plt.close(fig)
@@ -1017,7 +1030,7 @@ def save_plots(
         color="#666666",
         lw=1.1,
         ls=":",
-        label="trailing 20-day",
+        label=f"trailing {vol_window}-day",
     )
     axes[0].plot(
         lead,
@@ -1055,7 +1068,15 @@ def save_plots(
     plt.close(fig)
 
 
-def run_forecast(path: Path, prefix: str, asset_name: str, sweeps: int) -> None:
+def run_forecast(
+    path: Path,
+    prefix: str,
+    asset_name: str,
+    sweeps: int,
+    window: int = VOL_WINDOW,
+    holdout: int = HOLDOUT_DAYS,
+    annualization_days: int = 252,
+) -> None:
     """Fit one committed close snapshot and write its figures and scores.
 
     Args:
@@ -1063,10 +1084,20 @@ def run_forecast(path: Path, prefix: str, asset_name: str, sweeps: int) -> None:
         prefix: Filename stem for the figures.
         asset_name: Name used in the log and figure titles.
         sweeps: Gibbs sweeps. Forecasts use the second half.
+        window: Trailing realized-volatility window, in observations.
+        holdout: Trailing observations kept out of the fit.
+        annualization_days: 252 on a trading-day calendar, 365 on a
+            seven-day calendar.
     """
 
     snapshot = load_closes(path)
-    series = series_from_prices(snapshot["dates"], snapshot["closes"])
+    series = series_from_prices(
+        snapshot["dates"],
+        snapshot["closes"],
+        holdout=holdout,
+        window=window,
+        annualization_days=annualization_days,
+    )
     train_dates = series["dates_train"]
     hold_dates = series["dates_hold"]
     print(
@@ -1075,7 +1106,8 @@ def run_forecast(path: Path, prefix: str, asset_name: str, sweeps: int) -> None:
         f"train {train_dates[0]:%Y-%m-%d}..{train_dates[-1]:%Y-%m-%d} "
         f"n {train_dates.size}  "
         f"holdout {hold_dates[0]:%Y-%m-%d}..{hold_dates[-1]:%Y-%m-%d} "
-        f"n {hold_dates.size}  sweeps {sweeps}",
+        f"n {hold_dates.size}  window {window}  "
+        f"annualize sqrt({annualization_days})  sweeps {sweeps}",
         flush=True,
     )
     print(f"  source {snapshot['source']}", flush=True)

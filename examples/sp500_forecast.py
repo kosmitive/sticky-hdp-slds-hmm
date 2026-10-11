@@ -12,10 +12,12 @@ Both channels are standardized with the training window only, so the
 holdout does not set the units. The GARCH(1,1) Student-t baseline is fit
 with ``arch`` on the training returns only.
 
-The snapshot ``examples/data/sp500_daily.csv`` is a Yahoo Finance ``^GSPC``
-daily close download. The script does not fetch anything. The last 250
-trading days are held out. Priors below were chosen as weakly informative
-on standardized channels and were not adjusted to the holdout.
+The snapshot ``examples/data/sp500_daily.csv`` is a Yahoo Finance chart
+API ``^GSPC`` daily close, interval 1d, downloaded 2026-10-11. The
+2001-09-10 to 2001-09-17 market closure is kept. The script does not
+fetch anything. The last 250 trading days are held out. Priors below
+were chosen as weakly informative on standardized channels and were not
+adjusted to the holdout.
 
     python examples/sp500_forecast.py
     python examples/sp500_forecast.py 40

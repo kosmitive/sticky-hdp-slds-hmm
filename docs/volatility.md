@@ -21,27 +21,27 @@ Each script accepts a sweep count as its only argument. The default is 300.
 
 ![RMSE of log volatility through each lead](img/sp500_forecast_horizon.png)
 
-The snapshot `examples/data/sp500_daily.csv` is the Yahoo Finance `^GSPC` daily close, downloaded 2026-10-11. The fit uses 2005-02-01 through 2025-10-10 (5207 days) and holds out 2025-10-13 through 2026-10-09 (250 trading days). The run took 387.5 s.
+The snapshot `examples/data/sp500_daily.csv` is the Yahoo Finance chart API `^GSPC` daily close, interval 1d, downloaded 2026-10-11. The source and that date are in `examples/data/README.md`. The file runs from 1990-01-02 through 2026-10-09 (9261 rows). The only gap longer than five days is the market closure from 2001-09-10 to 2001-09-17, and that closure is kept. After the 20-day window the fit uses every remaining observation before the holdout, 1990-01-30 through 2025-10-10 (8991 days), and holds out 2025-10-13 through 2026-10-09 (250 trading days). That training window was long enough to finish, so it was not cut shorter. The run took 681.4 s.
 
 RMSE of log 20-day realized volatility:
 
 | Lead (days) | SLDS | Trailing 20-day | EWMA 0.94 | GARCH-t | Lowest RMSE |
 | --- | ---: | ---: | ---: | ---: | --- |
-| 1 | 0.069 | 0.094 | 0.074 | 0.048 | GARCH |
-| 5 | 0.082 | 0.101 | 0.041 | 0.064 | EWMA |
-| 20 | 0.154 | 0.178 | 0.041 | 0.215 | EWMA |
-| 60 | 0.186 | 0.181 | 0.163 | 0.451 | EWMA |
-| 250 | 0.228 | 0.228 | 0.217 | 0.608 | EWMA |
+| 1 | 0.068 | 0.094 | 0.074 | 0.059 | GARCH |
+| 5 | 0.072 | 0.101 | 0.041 | 0.044 | EWMA |
+| 20 | 0.145 | 0.178 | 0.041 | 0.150 | EWMA |
+| 60 | 0.180 | 0.181 | 0.163 | 0.350 | EWMA |
+| 250 | 0.229 | 0.228 | 0.217 | 0.487 | EWMA |
 
-GARCH wins day 1 (0.048). That day still has 19 known returns in the window, so the score is mostly a one-step variance forecast. From lead 5 on, EWMA wins, and at lead 20, the first window with no training returns, EWMA (0.041) is well ahead of GARCH (0.215) and the SLDS (0.154). The SLDS does not win a lead. Over 250 days EWMA is 0.217, the SLDS and the trailing value tie at 0.228, and GARCH is 0.608.
+GARCH wins day 1 (0.059). That day still has 19 known returns in the window, so the score is mostly a one-step variance forecast. From lead 5 on, EWMA wins, and at lead 20, the first window with no training returns, EWMA (0.041) is well ahead of GARCH (0.150) and the SLDS (0.145). The SLDS does not win a lead. Over 250 days EWMA is 0.217, the trailing value is 0.228, the SLDS is 0.229, and GARCH is 0.487.
 
-The SLDS 90% band covers every holdout day. The GARCH 90% band, the 5th to 95th percentile of 2000 simulated paths, also covers every holdout day. Both bands are wide. The GARCH fit has alpha 0.130, beta 0.864, persistence 0.993, and Student-t degrees of freedom 5.83.
+The SLDS 90% band covers every holdout day. The GARCH 90% band, the 5th to 95th percentile of 2000 simulated paths, also covers every holdout day. Both bands are wide. The GARCH fit has alpha 0.098, beta 0.897, persistence 0.994, and Student-t degrees of freedom 6.38.
 
-The return RMSE is 0.667 against 0.661 for predicting zero.
+The return RMSE is 0.711 against 0.704 for predicting zero.
 
 ![Last sweep, colored from calm to turbulent](img/sp500_modes.png)
 
-Labels in that figure are the last sweep, sorted so mode 0 has the lowest mean log volatility. Mean annualized volatility in those five slices is about 10%, 10%, 22%, 27%, and 23%. The two calm slices cover 18% and 37% of the training days. The 27% slice covers 3%. The annualized averages are not strictly increasing, because the sort is on mean log-volatility and a short slice can have a higher average after the exponential. What separates is a calm band near 10% and an elevated band near 23%, including the 2008 and 2020 declines. That is a coarse calm-versus-turbulent split, not five regimes. Every sweep in the second half occupies all 5 modes, so the truncation is full. The log joint over sweeps 151–300 has mean 10609, standard deviation 192, and slope -2.26 per sweep.
+Labels in that figure are the last sweep, sorted so mode 0 has the lowest mean log volatility. Mean annualized volatility in those five slices is about 11%, 11%, 12%, 23%, and 26%. The two slices near 11% cover 24% and 38% of the training days. The 12% slice covers 3%, so the calm cluster is about 65% of the sample. The 23% slice covers 25% and the 26% slice covers 11%. The annualized averages rise with the log-volatility sort on this draw. What separates is a calm band near 11% and an elevated band near 23–26%, including the early 1990s and the 2008 and 2020 declines. That is a coarse calm-versus-turbulent split, and five occupied modes means the truncation is full. Every sweep in the second half occupies all 5 modes. The log joint over sweeps 151–300 has mean 17545, standard deviation 267, and slope -3.23 per sweep. That slope is a small fraction of the sweep-to-sweep scatter.
 
 ![Log joint and occupied modes](img/sp500_convergence.png)
 
@@ -51,33 +51,33 @@ Labels in that figure are the last sweep, sorted so mode 0 has the lowest mean l
 
 ![RMSE of log volatility through each lead](img/btc_forecast_horizon.png)
 
-The snapshot `examples/data/btc_daily.csv` is the Yahoo Finance `BTC-USD` daily close, downloaded 2026-10-11. A later fetch did not replace it: Yahoo answered 429 and Stooq answered with a browser check. The file has a close on every calendar day from 2014-09-16 through 2026-10-10, with no gaps. After the 30-day window the fit uses 2014-10-16 through 2025-10-10 (4013 days) and holds out 2025-10-11 through 2026-10-10 (365 days). The same prior and seed as the S&P 500 are used. Nothing was retuned. The run took 297.1 s.
+The snapshot `examples/data/btc_daily.csv` is the Yahoo Finance chart API `BTC-USD` daily close, interval 1d, downloaded 2026-10-11. The download ran through 2026-10-11. That last row is the download date, so it is dropped as an incomplete session. The file kept here has a close on every calendar day from 2014-09-17 through 2026-10-10 (4407 rows). After the 30-day window the fit uses every remaining observation before the holdout, 2014-10-17 through 2025-10-10 (4012 days), and holds out 2025-10-11 through 2026-10-10 (365 days). The same prior and seed as the S&P 500 are used. Nothing was retuned, and the training window was not cut shorter. The run took 296.0 s.
 
 RMSE of log 30-day realized volatility. Leads 1, 5, and 20 still contain known training returns. Lead 60 does not.
 
 | Lead (days) | SLDS | Trailing 30-day | EWMA 0.94 | GARCH-t | Lowest RMSE |
 | --- | ---: | ---: | ---: | ---: | --- |
-| 1 | 0.047 | 0.055 | 0.034 | 0.019 | GARCH |
-| 5 | 0.047 | 0.073 | 0.016 | 0.042 | EWMA |
-| 20 | 0.042 | 0.096 | 0.079 | 0.217 | SLDS |
-| 60 | 0.070 | 0.143 | 0.091 | 0.407 | SLDS |
-| 365 | 0.404 | 0.298 | 0.314 | 1.112 | trailing |
+| 1 | 0.012 | 0.011 | 0.004 | 0.021 | EWMA |
+| 5 | 0.055 | 0.069 | 0.014 | 0.047 | EWMA |
+| 20 | 0.069 | 0.106 | 0.075 | 0.219 | SLDS |
+| 60 | 0.074 | 0.150 | 0.094 | 0.421 | SLDS |
+| 365 | 0.409 | 0.300 | 0.316 | 1.116 | trailing |
 
-GARCH wins day 1 (0.019). EWMA wins lead 5 (0.016). The SLDS wins lead 20 (0.042) and lead 60 (0.070). Lead 60 is the first of these horizons whose 30-day window contains no training returns, and there the SLDS beats EWMA (0.091), the trailing value (0.143), and GARCH (0.407). Over all 365 days the trailing 30-day value wins (0.298), ahead of EWMA (0.314) and the SLDS (0.404). GARCH is the worst of the four on that full window. Its persistence rounds to 1, so the variance forecast barely mean-reverts. The GARCH fit has alpha 0.107, beta 0.893, and Student-t degrees of freedom 3.19.
+EWMA wins day 1 (0.004) and lead 5 (0.014). The SLDS wins lead 20 (0.069) and lead 60 (0.074). Lead 60 is the first of these horizons whose 30-day window contains no training returns, and there the SLDS beats EWMA (0.094), the trailing value (0.150), and GARCH (0.421). Over all 365 days the trailing 30-day value wins (0.300), ahead of EWMA (0.316) and the SLDS (0.409). GARCH is the worst of the four on that full window (1.116). Its persistence rounds to 1, so the variance forecast barely mean-reverts. The GARCH fit has alpha 0.107, beta 0.893, and Student-t degrees of freedom 3.18.
 
-Both 90% bands cover every one of the first 60 holdout days. Over all 365 days the SLDS band covers 78.4% and the GARCH band covers 98.4%. The GARCH coverage is high because the band is wide: read it next to the RMSE of 1.112.
+Both 90% bands cover every one of the first 60 holdout days. Over all 365 days the SLDS band covers 85.5% and the GARCH band covers 98.4%. The GARCH coverage is high because the band is wide: read it next to the RMSE of 1.116.
 
-The return RMSE is 0.661 against 0.656 for predicting zero.
+The return RMSE is 0.670 against 0.657 for predicting zero.
 
 ![Last sweep, colored from calm to turbulent](img/btc_modes.png)
 
-The same last-sweep ordering, now in `sqrt(365)` units, gives mean annualized volatilities of about 34%, 43%, 47%, 62%, and 79%. The 43% slice covers 55% of training days. The 79% slice covers 21%. The 34% and 62% slices are thin. Relative to bitcoin's own history that is a calm-versus-turbulent split, not five separate regimes. Every sweep in the second half occupies all 5 modes. Sweeps 151–300 have log-joint mean 9695, standard deviation 237, and slope -4.39 per sweep, so that half is still moving.
+The same last-sweep ordering, now in `sqrt(365)` units, gives mean annualized volatilities of about 34%, 44%, 46%, 67%, and 80%. The 44% slice covers 59% of training days. The 46% slice covers 12%, and the 80% slice covers 20%. The 34% and 67% slices are thin, at 6% and 3%. Relative to bitcoin's own history that is a calm-versus-turbulent split. The 2020–2022 stretch and the late-2024 rise sit in the high slices. Every sweep in the second half occupies all 5 modes. Earlier sweeps sometimes used 4. Sweeps 151–300 have log-joint mean 9360, standard deviation 142, and slope -0.57 per sweep. That slope is small next to the scatter.
 
 ![Log joint and occupied modes](img/btc_convergence.png)
 
 ## How the series is built
 
-Daily closes are not the observations. A price level trends, so a linear dynamical mode spends its capacity on that drift. The return is `r_t = log(P_t / P_{t-1})`. On the S&P 500 those returns fall on trading days. On bitcoin the file has a close every calendar day, so the return is from one calendar day to the next. The volatility channel is the log of the root mean square over the dataset's window. Each channel is standardized with the mean and standard deviation of the training window only.
+Daily closes are not the observations. A price level trends, so a linear dynamical mode spends its capacity on that drift. The return is `r_t = log(P_t / P_{t-1})`. On the S&P 500 those returns fall on trading days, and the 2001-09-17 return is the move from the 2001-09-10 close across the closure. On bitcoin the file has a close every calendar day, so the return is from one calendar day to the next. The volatility channel is the log of the root mean square over the dataset's window. Each channel is standardized with the mean and standard deviation of the training window only.
 
 The model is a sticky HDP-SLDS with truncation 5, identity emission, and a weakly informative matrix-normal prior whose mean says a return is unpredictable and log volatility is persistent. Column precision is the identity, so the sample dominates. The sticky prior has mean `alpha + kappa = 8`, mean `rho = 0.8`, and mean `gamma = 2`. `gibbs_step` runs 300 sweeps from seed 23. Forecasts are draws from the second half of the chain, after the Gibbs loop.
 

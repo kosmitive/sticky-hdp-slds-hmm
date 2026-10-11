@@ -65,9 +65,21 @@ def test_snapshot_csv_records_the_download_and_parses_offline() -> None:
     snapshot = load_closes()
     assert snapshot["downloaded"] == "2026-10-11"
     closes = snapshot["closes"]
-    assert closes.shape[0] > 250 + 20
+    assert closes.shape[0] == 9261
     assert np.all(closes > 0.0)
-    assert snapshot["dates"][0] < snapshot["dates"][-1]
+    dates = snapshot["dates"]
+    assert dates[0].strftime("%Y-%m-%d") == "1990-01-02"
+    assert dates[-1].strftime("%Y-%m-%d") == "2026-10-09"
+    gaps = [
+        (
+            dates[i - 1].strftime("%Y-%m-%d"),
+            dates[i].strftime("%Y-%m-%d"),
+            (dates[i] - dates[i - 1]).days,
+        )
+        for i in range(1, len(dates))
+        if (dates[i] - dates[i - 1]).days > 5
+    ]
+    assert gaps == [("2001-09-10", "2001-09-17", 7)]
 
 
 def test_ewma_holds_the_last_forecast_flat() -> None:
@@ -180,7 +192,17 @@ def test_bitcoin_snapshot_is_a_daily_calendar() -> None:
     assert spec["holdout"] == 365
     assert spec["annualization_days"] == 365
     snapshot = load_closes(_BTC_PATH)
-    ordinals = np.array([day.toordinal() for day in snapshot["dates"]])
+    dates = snapshot["dates"]
+    assert dates[0].strftime("%Y-%m-%d") == "2014-09-17"
+    assert dates[-1].strftime("%Y-%m-%d") == "2026-10-10"
+    data_rows = [
+        line
+        for line in _BTC_PATH.read_text().splitlines()
+        if line and not line.startswith("#") and not line.lower().startswith("date")
+    ]
+    assert data_rows[-1].startswith("2026-10-10,")
+    assert not any(line.startswith("2026-10-11,") for line in data_rows)
+    ordinals = np.array([day.toordinal() for day in dates])
     assert np.all(np.diff(ordinals) == 1)
     series = series_from_prices(
         snapshot["dates"],

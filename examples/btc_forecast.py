@@ -6,9 +6,10 @@ with ``sqrt(365)``. The last 365 days are held out. The return is the
 second observation. Priors match the S&P 500 run and were not tuned on
 the holdout.
 
-The snapshot is the committed Yahoo Finance ``BTC-USD`` daily close.
-A fresh download was not available: Yahoo answered 429 and Stooq answered
-with a browser check. The script does not fetch anything.
+The snapshot is the Yahoo Finance chart API ``BTC-USD`` daily close,
+interval 1d, downloaded 2026-10-11. The row dated 2026-10-11, the
+download date, is dropped as an incomplete session. The script does not
+fetch anything.
 
     python examples/btc_forecast.py
     python examples/volatility_forecast.py btc

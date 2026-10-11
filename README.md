@@ -44,10 +44,32 @@ pytest
 | `data/` | Synthetic data generation |
 | `data_packs/` | Checked-in MNIW and ARD datasets |
 | `examples/smoke_slds.py` | Short end-to-end run |
+| `examples/pendulum_demo.py` | Noisy pendulum, with the figures below |
 | `tests/` | Regression tests for the sampler |
 | `docs/REFACTOR_ANALYSIS.md` | Structure, defects, and the remaining refactor |
+| `docs/img/` | Pendulum convergence, reconstruction, and mode figures |
 
 `hdp_params` is `[alpha + kappa, rho, gamma, beta, pi]`. `slds_params` is `[A, Sigma]` for the matrix-normal inverse-Wishart prior and `[A, Sigma, alpha]` for the ARD prior.
+
+## Noisy pendulum
+
+```bash
+python examples/pendulum_demo.py
+```
+
+The script integrates a nonlinear pendulum with the symplectic Euler method (`g/l = 9.81`) and fits the sticky HDP-SLDS. Four traces are released from rest at 0.45, 1.05, 1.70, and 2.35 rad. Each trace has 160 steps of `dt = 0.05` s. The observations are the angle and the angular velocity, with standard deviations 0.04 and 0.12, and the velocity also receives a process disturbance of standard deviation 0.01. The emission matrix is the identity, so piecewise-linear modes are asked to track the angle dependence of `sin(theta)`.
+
+The truncation is 5 modes. Prior means are `alpha + kappa = 12`, `rho = 0.92`, and `gamma = 1.5`. The matrix-normal mean is the small-angle map of the same integrator, with column precision `40 I`. Those scales belong to this series. A different length, noise level, or sampling rate needs its own prior.
+
+The figures below are seed 11, 300 Gibbs sweeps, 104.7 s on the machine that produced them. The complete-data log joint leaves the initialization immediately: 3076 after sweep 1, then a band around 3500. The four quarter means are 3494, 3552, 3512, and 3548. Over sweeps 151–300 the mean is 3530, the standard deviation is 44, and the least-squares slope is +0.46 per sweep. That slope is a small fraction of the sweep-to-sweep scatter. The occupied-mode count stays at 2, with a second-half average of 2.03. A third mode shows up on isolated sweeps and is dropped again.
+
+The last sample splits the swing into two sticky regimes. The mode whose mean absolute angle is 0.54 has restoring entry `A_{2,1} = -0.442` and a mean dwell of 30 steps. The small-angle integrator has `A_{2,1} = -dt * g/l = -0.491`. The mode whose mean absolute angle is 1.60 has `A_{2,1} = -0.258` and a mean dwell of 17 steps, the softer restoring force of a large swing. The posterior mean of the latent state over the second half of the chain has RMSE 0.057 against the noise-free trajectory. The raw observations have RMSE 0.089.
+
+![Log joint and occupied modes across 300 sweeps](docs/img/pendulum_convergence.png)
+
+![Observed, noise-free, and posterior-mean angle and angular velocity](docs/img/pendulum_reconstruction.png)
+
+![Final mode sample against the noise-free angle](docs/img/pendulum_modes.png)
 
 ## Tests
 

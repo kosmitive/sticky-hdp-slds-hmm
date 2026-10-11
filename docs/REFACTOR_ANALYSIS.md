@@ -109,3 +109,7 @@ The algorithm’s shape is unchanged: the same mixins, the same truncation, the 
 8. **Continuous integration.** Run `pytest` on a current NumPy and SciPy. The suite is under a second on the smoke size and does not need the plotting driver.
 
 Items 1 and 2 are the refactor. Items 3 and 5 change numerical results and should not be folded into a rename. Items 4, 6, 7, and 8 are safe once the state object exists.
+
+## Pendulum check
+
+`examples/pendulum_demo.py` runs this sampler on a noisy nonlinear pendulum: four releases, 160 steps of 0.05 s, identity emissions, truncation 5. The figures in `docs/img/` are seed 11 and 300 Gibbs sweeps. The complete-data log joint leaves initialization in the first few sweeps and then fluctuates around 3530. The chain occupies two sticky modes, and the last sample gives a stiffer restoring gain at small absolute angle than at large absolute angle. The README records the prior scales, the quarter means, and the RMSE.

@@ -68,12 +68,11 @@ def stick_breaking_construction_dp(alpha, base_measure, num_modes, k_max=10000):
 
     # String names are not arrays. Comparing an array with ``==`` raises
     # in current NumPy and used to make ``max_likely_sample`` crash.
-    if isinstance(base_measure, str):
-        match base_measure:
-            case 'uniform':
-                base_measure = np.ones(num_modes) / num_modes
-            case _:
-                raise ValueError(f"Unknown base measure {base_measure!r}.")
+    # ``if`` / ``elif`` keeps this valid on the declared Python 3.9 floor.
+    if isinstance(base_measure, str) and base_measure == 'uniform':
+        base_measure = np.ones(num_modes) / num_modes
+    elif isinstance(base_measure, str):
+        raise ValueError(f"Unknown base measure {base_measure!r}.")
 
     base_measure = np.asarray(base_measure, dtype=np.float64)
     base_measure = base_measure / np.sum(base_measure)

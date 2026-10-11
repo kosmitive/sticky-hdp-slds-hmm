@@ -39,10 +39,13 @@ class MNIWPrior:
         """This initializes a new mniw prior, which can be e.g. used to set a prior
         on a transformation and noise covariance.
 
-        :param M: The mean of the matrix normal.
-        :param K: The column variance
-        :param n0: The dof of the inverse wishart.
-        :param S0: The scale of the inverse wishart.
+        Args:
+            M: Mean of the matrix-normal prior on each dynamic matrix.
+            K: Column precision. The prior is ``MN(M, Sigma, K^{-1})``,
+                which is the parameterization whose conjugate update adds
+                ``K`` to ``X X^T`` (Fox et al., Eq. 21).
+            n0: Degrees of freedom of the inverse-Wishart prior.
+            S0: Scale matrix of the inverse-Wishart prior.
         """
 
         self.M = M
@@ -61,7 +64,7 @@ class MNIWPrior:
 
         # fill at separately
         for z in range(num):
-            A[z] = matrix_normal.rvs(self.M, Sigma[z], self.K)
+            A[z] = matrix_normal.rvs(self.M, Sigma[z], np.linalg.inv(self.K))
 
         # pass back the sample
         return [A, Sigma]

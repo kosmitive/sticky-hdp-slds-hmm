@@ -48,7 +48,8 @@ class ARDPrior:
 
         # perform a simple forward sample
         nd = self.S0.shape[0]
-        alpha = gamma.rvs(self.alpha0[0], 1 / self.alpha0[1], size=(num, nd))
+        # scipy.stats.gamma.rvs(a, loc, scale). The rate enters as the scale.
+        alpha = gamma.rvs(self.alpha0[0], scale=1.0 / self.alpha0[1], size=(num, nd))
 
         # use the generated alpha to generate the modes
         cov = np.diag(1 / alpha.repeat(nd))

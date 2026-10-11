@@ -31,4 +31,5 @@ def execute_all_testcases():
     #slds_ard_all_test()
 
 
-execute_all_testcases()
+if __name__ == '__main__':
+    execute_all_testcases()

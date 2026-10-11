@@ -47,6 +47,15 @@ class StickyHDPSLDSHMMModel(StickyHDPSLDSHMMModelBlockXMixin, StickyHDPSLDSHMMMo
                             StickyHDPSLDSHMMModelEmissionMixin, StickyHDPSLDSHMMModelHDPMixin,
                             StickyHDPSLDSHMMModelSeqZMixin, StickyHDPSLDSHMMModelInitMixin,
                             StickyHDPSLDSHMMModelARDMixin):
+    """Sticky HDP switching linear dynamical system.
+
+    The Gibbs conditionals live on the mixins in ``slds``. ``hdp_params`` is
+    ``[alpha_plus_kappa, rho, gamma, beta, pi]`` and ``slds_params`` is
+    ``[A, Sigma]`` or ``[A, Sigma, alpha]`` when the dynamics prior is ARD.
+    ``C`` is the fixed emission matrix. ``latent_prior`` is the covariance
+    of the auxiliary parent state, and ``emission_prior`` is
+    ``[degrees_of_freedom, scale]`` for the shared measurement covariance.
+    """
 
     fn_main = 'hdp_slds_hmm_model.json'
     fn_beta = 'beta.npy'
@@ -98,72 +107,53 @@ class StickyHDPSLDSHMMModel(StickyHDPSLDSHMMModelBlockXMixin, StickyHDPSLDSHMMMo
         else:
             self.dyn_prior_type = None
 
-    def calc_log_likelihood(self):
-        """This method calculated the log likelihood of the model. Therefore all variables have to be set for it.
+    def calc_log_likelihood(self) -> float:
+        """Joint log density of the observations, latents, and mode sequence.
 
-        :return: The negative log likelihood gets passed back in return.
+        The initial mode is scored under ``beta``. Each later mode is scored
+        under the corresponding row of ``pi``. Latent transitions start at the
+        second time index, because the first stored state has no parent.
+
+        Returns:
+            The log joint, up to terms that do not depend on the sampled variables.
         """
 
-        # calc all terms separately
         state_transition_ll = self.__calc_mode_transition_ll()
         latent_transition_ll = self.__calc_latent_transition_ll()
         emission_ll = self.__calc_emission_ll()
-
-        # pass back the negative sum
         return emission_ll + state_transition_ll + latent_transition_ll
 
-    def __calc_latent_transition_ll(self):
+    def __calc_latent_transition_ll(self) -> float:
+        """Log density of ``x_t | x_{t-1}, z_t`` for every trace and ``t >= 1``."""
 
-        """Calculates log likelihood of the latent transitions."""
+        num_traces, num_steps, _ = self.x.shape
+        latent_transition_ll = 0.0
+        for trace in range(num_traces):
+            for step in range(1, num_steps):
+                mode = int(self.z[trace, step])
+                mean_x = self.slds_params[0][mode] @ self.x[trace, step - 1]
+                latent_transition_ll += multivariate_normal.logpdf(
+                    self.x[trace, step],
+                    mean_x,
+                    self.slds_params[1][mode],
+                )
+        return float(latent_transition_ll)
 
-        # obtain transition matrices
-        rsh_z = self.z[:, 1:].reshape(-1)
-        latent_transition_ll = 0
+    def __calc_mode_transition_ll(self) -> float:
+        """Log density of the mode chain, including the ``beta`` draw of ``z_0``."""
 
-        # calculate the term of the latent states
-        num_modes, _ = self.hdp_params[4].shape
-        num_traces, num_steps, latent_dim = self.x.shape
-        comb_traces = self.x.reshape([num_traces * num_steps, -1])
+        pi = np.asarray(self.hdp_params[4], dtype=np.float64)
+        beta = np.asarray(self.hdp_params[3], dtype=np.float64)
+        num_modes = pi.shape[0]
+        safe_pi = np.clip(pi, 1e-12, None)
+        safe_pi = safe_pi / np.sum(safe_pi, axis=1, keepdims=True)
 
-        # iterate over all possible mode assignments
-        for k in range(num_modes):
-            # get indices of elements with k
-            lin_indices = np.squeeze(np.argwhere(rsh_z == k), 1)
-
-            # represents the transition matrix and the covariance
-            tr_mat = self.slds_params[0][k]
-            cov_mat = self.slds_params[1][k]
-
-            # update indices
-            lin_indices += np.floor(lin_indices / num_steps).astype(np.int64) + 1
-
-            # calculate means
-            mean_x = comb_traces[lin_indices - 1] @ tr_mat.transpose()
-
-            # calc emission
-            latent_transition_ll = 0
-            for k in range(len(lin_indices)):
-                latent_transition_ll += multivariate_normal.logpdf(comb_traces[lin_indices[k]], mean_x[k], cov_mat)
-
-        return latent_transition_ll
-
-    def __calc_mode_transition_ll(self):
-        """Calculated the log likelihood of the state transitions."""
-
-        num_modes = self.hdp_params[4].shape[0]
-
-        # create cost matrix for all assignment combinations
         transitions = (num_modes * self.z[:, :-1] + self.z[:, 1:]).reshape(-1)
         transition_factors = np.bincount(transitions, minlength=num_modes ** 2)
         transition_count_matrix = transition_factors.reshape([num_modes] * 2)
-        smoothed_measure = self.hdp_params[4] + 1e-6
-        smoothed_measure = smoothed_measure / np.expand_dims(np.sum(smoothed_measure, 1), 0)
-        state_transition_ll = np.sum(transition_count_matrix * np.log(smoothed_measure))
-
-        if np.isnan(state_transition_ll):
-            print("Test")
-
-        return state_transition_ll
+        state_transition_ll = np.sum(transition_count_matrix * np.log(safe_pi))
+        state_transition_ll += np.sum(np.log(np.clip(beta[self.z[:, 0]], 1e-12, None)))
+        return float(state_transition_ll)
 
     def __calc_emission_ll(self):
         """Calculate log likelihood of emissions."""
@@ -183,17 +173,23 @@ class StickyHDPSLDSHMMModel(StickyHDPSLDSHMMModelBlockXMixin, StickyHDPSLDSHMMMo
 
         return emission_ll
 
-    def simulate(self, num_traces, num_steps):
-        """Uses the prior information an so on, to simulate some traces.
+    def simulate(self, num_traces: int, num_steps: int, init: bool = True) -> None:
+        """Simulate traces and store every series except the auxiliary parent state.
 
-        :return: collected traces
+        Args:
+            num_traces: Number of independent sequences.
+            num_steps: Number of stored time steps per sequence.
+            init: When true, redraw HDP, dynamics, and emission parameters
+                from their priors before simulating. Set this false to keep
+                parameters that have already been assigned.
         """
 
         # reserve space for the simulation
         z = np.empty([num_traces, num_steps + 1], dtype=np.int64)
         x = np.empty([num_traces, num_steps + 1, self.ld])
 
-        self.init_params()
+        if init or self.slds_params is None or self.hdp_params[4] is None:
+            self.init_params()
         beta = self.hdp_params[3]
         pi = self.hdp_params[4]
         slds_params = self.slds_params
@@ -220,16 +216,18 @@ class StickyHDPSLDSHMMModel(StickyHDPSLDSHMMModelBlockXMixin, StickyHDPSLDSHMMMo
                 x[t, s] = slds_params[0][cur_z] @ x[t, s - 1] + e[t, s - 1]
                 z[t, s] = cur_z
 
-        # emissions
-        w = np.random.multivariate_normal(np.zeros(self.od), self.R, [num_traces * (num_steps + 1)])
-        y = x.reshape([-1, self.ld]) @ self.C.transpose() + w
+        # emissions. Drop the same initial time index that is dropped from y.
+        w = np.random.multivariate_normal(
+            np.zeros(self.od), self.R, [num_traces, num_steps + 1]
+        )
+        y = x.reshape([-1, self.ld]) @ self.C.transpose() + w.reshape([-1, self.od])
         y = y.reshape([num_traces, num_steps + 1, self.od])
 
         self.z = z[:, 1:]
         self.x = x[:, 1:]
         self.e = e
         self.y = y[:, 1:]
-        self.w = w
+        self.w = w[:, 1:]
 
     def init_params(self):
 
@@ -275,7 +273,7 @@ class StickyHDPSLDSHMMModel(StickyHDPSLDSHMMModelBlockXMixin, StickyHDPSLDSHMMMo
         A = np.load(join(folder, StickyHDPSLDSHMMModel.fn_A))
         Sigma = np.load(join(folder, StickyHDPSLDSHMMModel.fn_Sigma))
         m.slds_params = [A, Sigma]
-        if data['prior'] is 'ard':
+        if data['prior'] == 'ard':
             m.slds_params.append(np.load(join(folder, StickyHDPSLDSHMMModel.fn_ard_alpha)))
 
         # save rest

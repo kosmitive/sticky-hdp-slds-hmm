@@ -69,32 +69,24 @@ class StickyHDPSLDSHMMModelARDMixin:
             # obtain number of elements
             num_elements = prob_ct[k].shape[1]
 
-            # rename
-            current_cov = self.slds_params[1][k]
+            # Eq. (30): information form uses Sigma^{-1}, and the ARD prior
+            # precision on column j is alpha_j (n replicates under column-major vec).
+            noise_precision = np.linalg.inv(self.slds_params[1][k])
+            info = np.zeros(self.ld ** 2)
+            precision = np.diag(np.repeat(alphas[k], self.ld))
 
-            # iterate over
-            inv_mean = np.zeros(self.ld ** 2)
-            sigma0 = np.repeat(1 / alphas[k], self.ld)
-            inv_cov = np.diag(sigma0)
-
-            # iterate over all elements
             for i in range(num_elements):
-
-                # construct matrix
                 mat = np.tile(np.eye(self.ld), [1, self.ld])
                 mat *= np.expand_dims(np.repeat(prob_pt[k][:, i], self.ld), 0)
+                info += mat.transpose() @ noise_precision @ prob_ct[k][:, i]
+                precision += mat.transpose() @ noise_precision @ mat
 
-                # add up
-                inv_mean += mat.transpose() @ current_cov @ prob_ct[k][:, i]
-                inv_cov += mat.transpose() @ current_cov @ mat
-
-            # sample new matrix
-            cov = np.linalg.inv(inv_cov)
-            mean = cov @ inv_mean
+            cov = np.linalg.inv(precision)
+            cov = 0.5 * (cov + cov.T)
+            mean = cov @ info
             new_A = np.random.multivariate_normal(mean, cov)
-
-            # sample new dynamic matrix
-            self.slds_params[0][k] = new_A.reshape([self.ld] * 2)
+            # Column-major vectorization matches the design matrix above.
+            self.slds_params[0][k] = new_A.reshape((self.ld, self.ld), order='F')
 
     def __slds_post_ard_dynamics_sample_alpha(self):
 
@@ -103,9 +95,10 @@ class StickyHDPSLDSHMMModelARDMixin:
 
             # rename
             current_dyn = self.slds_params[0][k]
+            # Eq. (31): rate += (1/2) * sum of squares in the column.
             alpha_a = self.dyn_prior.alpha0[0] + self.ld / 2
-            alpha_b = self.dyn_prior.alpha0[1] + np.sum(current_dyn ** 2, 0)
-            self.slds_params[2][k, :] = np.random.gamma(alpha_a, 1 / alpha_b)
+            alpha_b = self.dyn_prior.alpha0[1] + 0.5 * np.sum(current_dyn ** 2, axis=0)
+            self.slds_params[2][k, :] = np.random.gamma(alpha_a, 1.0 / alpha_b)
 
     def __split_into_regression_problems(self):
 
@@ -115,9 +108,8 @@ class StickyHDPSLDSHMMModelARDMixin:
 
         num_traces, num_steps, latent_dim = pseudo_observations.shape
         dim = latent_dim
-        n = np.bincount(mode_seq[:, 0].reshape(-1), minlength=max_state)
 
-        # calculate the bins and count for each bin how far it is progressed
+        # Pairs exist only for t >= 1. The first state has no stored parent.
         bins = np.bincount(mode_seq[:, 1:].reshape(-1), minlength=max_state)
         indices = np.zeros(max_state, dtype=np.int64)
 
@@ -135,5 +127,5 @@ class StickyHDPSLDSHMMModelARDMixin:
                 prob_h[k][:, i] = pseudo_observations[d, t-1]
                 indices[k] += 1
 
-        return prob_h, prob_oh, n + bins
+        return prob_h, prob_oh, bins
 

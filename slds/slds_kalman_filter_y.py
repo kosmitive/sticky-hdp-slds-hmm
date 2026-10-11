@@ -44,9 +44,11 @@ class StickyHDPSLDSHMMModelKalmanYMixin:
         kalman_gain_mats = np.zeros([num_traces, num_steps+1, num_state_dim, num_state_dim])
         kalman_gain_vecs = np.zeros([num_traces, num_steps+1, num_state_dim])
 
-        # init them
+        # x_0 ~ N(0, P0) has information matrix P0^{-1}, not P0.
+        # Eq. (181) of Fox et al. (arXiv:1003.3829).
+        prior_precision = np.linalg.inv(self.latent_prior)
         for d in range(num_traces):
-            kalman_gain_mats[d, 0] = self.latent_prior
+            kalman_gain_mats[d, 0] = prior_precision
             kalman_gain_vecs[d, 0] = 0
 
         # define constants

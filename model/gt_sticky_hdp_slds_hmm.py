@@ -108,7 +108,7 @@ class StickyHDPSLDSHMMConfiguration:
 
         # rounds
         if 'rounds_ard' in test_conf: m.rounds_ard = test_conf['rounds_ard']
-        if 'rounds_hdp' in test_conf: m.rounds_ard = test_conf['rounds_hdp']
+        if 'rounds_hdp' in test_conf: m.rounds_hdp = test_conf['rounds_hdp']
         if 'rounds_hmm' in test_conf: m.rounds_hmm = test_conf['rounds_hmm']
 
         # store hdp params
@@ -235,8 +235,6 @@ class StickyHDPSLDSHMMConfiguration:
             # simply print out hte first trace
 
             print_line()
-            if np.isnan(self.it_ll):
-                print("Test")
             print("\t| ll = \t\t\t{:.5f} \t{}[{:.5f}]{}\t{}[{:.5f}]{}".format(self.it_ll, ACC.OkBlue, self.gt_ll, ACC.End, ACC.Red, self.best_ll, ACC.End))
             ham, _ = minimum_hamming_distance(self.it.z, self.gt.z)
             print("\t| ham_dist = \t{}".format(ham))
@@ -344,7 +342,7 @@ class StickyHDPSLDSHMMConfiguration:
 
         # sample dynamics and R
         if self.sample_dynamics:
-            if self.it.dyn_prior_type is 'ard':
+            if self.it.dyn_prior_type == 'ard':
                 for k in range(self.rounds_ard):
                     self.it.slds_post_ard_dynamics_param_sampling()
             else:

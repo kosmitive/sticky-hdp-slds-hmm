@@ -55,8 +55,15 @@ class StickyHDPSLDSHMMModelMNIWMixin:
 
             new_m = s_oh @ np.linalg.inv(s_hh)
             iw_scale = s_oo - new_m @ s_oh.transpose()
+            iw_scale = 0.5 * (iw_scale + iw_scale.T)
             state_dyn_var_mode[k] = invwishart.rvs(n0 + n[k], S0 + iw_scale)
-            state_dyn_mode[k] = matrix_normal.rvs(new_m, np.linalg.inv(state_dyn_var_mode[k]), s_hh)
+            # MN(mean, left=Sigma, right=S_xx^{-1}). Passing the precisions
+            # draws from a posterior that does not concentrate with the data.
+            state_dyn_mode[k] = matrix_normal.rvs(
+                new_m,
+                state_dyn_var_mode[k],
+                np.linalg.inv(s_hh),
+            )
 
         self.slds_params = [state_dyn_mode, state_dyn_var_mode]
 
@@ -68,9 +75,9 @@ class StickyHDPSLDSHMMModelMNIWMixin:
 
         num_traces, num_steps, latent_dim = pseudo_observations.shape
         dim = latent_dim
-        n = np.bincount(mode_seq[:, 0].reshape(-1), minlength=max_state)
 
-        # calculate the bins and count for each bin how far it is progressed
+        # Pairs exist only for t >= 1. The first state has no stored parent,
+        # so it is not an inverse-Wishart observation.
         bins = np.bincount(mode_seq[:, 1:].reshape(-1), minlength=max_state)
         indices = np.zeros(max_state, dtype=np.int64)
 
@@ -88,5 +95,5 @@ class StickyHDPSLDSHMMModelMNIWMixin:
                 prob_h[k][:, i] = pseudo_observations[d, t-1]
                 indices[k] += 1
 
-        return prob_h, prob_oh, n + bins
+        return prob_h, prob_oh, bins
 

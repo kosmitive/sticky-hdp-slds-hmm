@@ -24,8 +24,6 @@
 import numpy as np
 import scipy.stats as sp
 
-from misc.disc_sample import sample_cat
-
 
 class StickyHDPSLDSHMMModelBlockZMixin:
 
@@ -57,16 +55,22 @@ class StickyHDPSLDSHMMModelBlockZMixin:
         num_traces, num_steps, max_state = gauss_dens.shape
         pi = self.hdp_params[4]
 
-        # iterate over and fill
+        # The chain starts at beta. Later states use the row of pi selected
+        # by the mode just sampled at t - 1.
+        beta = self.hdp_params[3]
         for t in range(num_steps):
-
-            # simply
-            f = pi[self.z[:, t - 1]] if t > 0 else np.ones([num_traces, max_state])
-            f *= gauss_dens[:, t] * messages[:, t]
+            if t > 0:
+                f = pi[self.z[:, t - 1]] * gauss_dens[:, t] * messages[:, t]
+            else:
+                f = beta * gauss_dens[:, t] * messages[:, t]
 
             for d in range(num_traces):
-                z_t = np.random.choice(np.arange(max_state), p=f[d] / np.sum(f[d]))
-                self.z[d, t] = z_t
+                total = np.sum(f[d])
+                if total <= 0.0 or not np.isfinite(total):
+                    probs = np.full(max_state, 1.0 / max_state)
+                else:
+                    probs = f[d] / total
+                self.z[d, t] = np.random.choice(np.arange(max_state), p=probs)
 
     def __calc_messages(self, gauss_dens):
         """This method calculates the messages passed from the latent dynamic
@@ -79,15 +83,16 @@ class StickyHDPSLDSHMMModelBlockZMixin:
 
         num_traces, num_steps, max_state = gauss_dens.shape
 
-        # execute belief prog
-        messages = np.ones([num_traces, num_steps + 1, max_state])
-
-        # iterate over
-        for t in reversed(range(num_steps)):
-            for k in range(max_state):
-                mult = gauss_dens[:, t] * messages[:, t + 1]
-                res = np.einsum('kj,nj->nk', self.hdp_params[4], mult)
-                messages[:, t, :] = res
+        # m_t(k) = sum_j pi_{k j} lik(x_{t+1} | x_t, j) m_{t+1}(j).
+        # The current likelihood is applied when the mode is sampled, so it
+        # must not also be folded into m_t. The terminal message is one.
+        messages = np.ones([num_traces, num_steps, max_state])
+        pi = self.hdp_params[4]
+        for t in reversed(range(num_steps - 1)):
+            mult = gauss_dens[:, t + 1] * messages[:, t + 1]
+            messages[:, t, :] = np.einsum('kj,nj->nk', pi, mult)
+            totals = np.sum(messages[:, t, :], axis=1, keepdims=True)
+            messages[:, t, :] /= np.maximum(totals, 1e-300)
 
         return messages
 

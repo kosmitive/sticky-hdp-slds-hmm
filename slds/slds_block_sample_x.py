@@ -32,7 +32,15 @@ class StickyHDPSLDSHMMModelBlockXMixin:
         num_steps -= 1
 
         pseudo_observations = np.empty([num_traces, num_steps + 1, state_dim])
-        pseudo_observations[:, 0] = np.random.multivariate_normal(np.zeros(state_dim), np.eye(state_dim), num_traces)
+        # Implicit parent x_0 ~ N(0, P0), updated by the backward message
+        # m_{1,0}(x_0). Index 0 of the backward filter is that message.
+        prior_precision = np.linalg.inv(self.latent_prior)
+        for d in range(num_traces):
+            precision = prior_precision + backward_gain_mat[d, 0]
+            covariance = np.linalg.inv(precision)
+            covariance = 0.5 * (covariance + covariance.T)
+            mean = covariance @ backward_gain_vec[d, 0]
+            pseudo_observations[d, 0] = np.random.multivariate_normal(mean, covariance)
 
         for d in range(num_traces):
 
@@ -44,6 +52,7 @@ class StickyHDPSLDSHMMModelBlockXMixin:
                 inv_dyn_var_mat = np.linalg.inv(dyn_var_mat)
 
                 inv_sigma_lam = np.linalg.inv(inv_dyn_var_mat + backward_gain_mat[d, t + 1])
+                inv_sigma_lam = 0.5 * (inv_sigma_lam + inv_sigma_lam.T)
                 middle = inv_dyn_var_mat @ dyn_mat @ pseudo_observations[d, t] + backward_gain_vec[d, t + 1]
                 pseudo_observations[d, t + 1] = np.random.multivariate_normal(inv_sigma_lam @ middle, inv_sigma_lam)
 

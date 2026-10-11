@@ -118,5 +118,6 @@ def generate_ard_data(root='./data_packs', name='hdp_slds_ard'):
     generate_hdp_slds_groundtrouth(folder, num_traces, num_steps, model)
 
 
-generate_ard_data()
-generate_mniw_data()
+if __name__ == '__main__':
+    generate_ard_data()
+    generate_mniw_data()

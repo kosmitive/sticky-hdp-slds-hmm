@@ -21,19 +21,24 @@
 # SOFTWARE.
 
 
-import scipy.special
+import numpy as np
 from scipy.stats import invwishart
-
-from slds.slds_seq_sample_z import *
 
 
 class StickyHDPSLDSHMMModelEmissionMixin:
 
-    def slds_post_sample_r(self):
+    def slds_post_sample_r(self) -> None:
+        """Sample the shared emission covariance from its inverse-Wishart posterior.
+
+        Fox et al. (arXiv:1003.3829), Eq. (34), give
+        ``R ~ IW(r0 + T, R0 + S_R)`` where ``T`` is the number of
+        observations. Multiple traces contribute ``num_traces * num_steps``
+        observations, not their sum.
+        """
 
         num_traces, num_steps, _ = self.y.shape
-        dof = num_traces + num_steps + self.emission_prior[0]
-        scale = self.emission_prior[1]
+        dof = num_traces * num_steps + self.emission_prior[0]
+        scale = np.array(self.emission_prior[1], dtype=np.float64, copy=True)
 
         for d in range(num_traces):
             for t in range(num_steps):

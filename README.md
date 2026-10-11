@@ -97,4 +97,4 @@ The chain mixes inside a band; it does not freeze. Two modes are what this prior
 
 ## License
 
-MIT. Copyright (c) 2018 Markus Semmler.
+MIT. See [LICENSE](LICENSE).

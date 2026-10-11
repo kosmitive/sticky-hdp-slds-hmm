@@ -9,7 +9,8 @@ in percent, ``100 * exp(log rv) * sqrt(252)``. The return is the second
 observation, not the quantity the forecast is judged on.
 
 Both channels are standardized with the training window only, so the
-holdout does not set the units.
+holdout does not set the units. The GARCH(1,1) Student-t baseline is fit
+with ``arch`` on the training returns only.
 
 The snapshot ``examples/data/sp500_daily.csv`` is a Yahoo Finance ``^GSPC``
 daily close download. The script does not fetch anything. The last 250
@@ -33,8 +34,7 @@ matplotlib.use("Agg")
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.optimize import minimize
-from scipy.special import gammaln
+from arch import arch_model
 
 _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
@@ -53,6 +53,8 @@ HOLDOUT_DAYS = 250
 DEFAULT_SWEEPS = 300
 _LOG_VOL_HORIZONS = (1, 5, 20, 60)
 _ANNUALIZATION = float(np.sqrt(252.0))
+_GARCH_SIMULATIONS = 2000
+_GARCH_SEED = 23
 _DATA_PATH = Path(__file__).resolve().parent / "data" / "sp500_daily.csv"
 _IMG_DIR = _ROOT / "docs" / "img"
 _CONTEXT_DAYS = 250
@@ -350,98 +352,103 @@ def ewma_variance_forecast(returns: np.ndarray, last_known: int, lam: float = 0.
     return sigma2
 
 
-def _garch_variance(returns: np.ndarray, omega: float, alpha: float, beta: float) -> np.ndarray:
-    """Filter a GARCH(1,1) variance path. The first entry is the unconditional variance."""
+def _fit_arch_garch(returns: np.ndarray):
+    """Fit a zero-mean GARCH(1,1) Student-t model with ``arch``.
 
-    sigma2 = np.empty(returns.shape[0], dtype=np.float64)
-    sigma2[0] = omega / (1.0 - alpha - beta)
-    for index in range(1, returns.size):
-        sigma2[index] = omega + alpha * returns[index - 1] ** 2 + beta * sigma2[index - 1]
-    return np.maximum(sigma2, 1e-12)
-
-
-def _student_t_nll(returns: np.ndarray, sigma2: np.ndarray, nu: float) -> float:
-    """Negative log-likelihood of a Student-t with variance ``sigma2``."""
-
-    scaled = returns**2 / ((nu - 2.0) * sigma2)
-    log_density = (
-        gammaln((nu + 1.0) / 2.0)
-        - gammaln(nu / 2.0)
-        - 0.5 * np.log((nu - 2.0) * np.pi)
-        - 0.5 * np.log(sigma2)
-        - ((nu + 1.0) / 2.0) * np.log1p(scaled)
-    )
-    return -float(np.sum(log_density))
-
-
-def fit_garch_student(returns: np.ndarray) -> dict[str, float]:
-    """Fit GARCH(1,1) with Student-t errors by maximum likelihood.
-
-    The fit uses only the returns passed in. Parameters are constrained to
-    ``omega > 0``, ``alpha >= 0``, ``beta >= 0``, ``alpha + beta < 1``, and
-    ``nu > 2``.
+    ``rescale=True`` multiplies the returns by ``result.scale`` (100 for
+    these daily log returns) so the optimizer sees order-1 data. ``omega``
+    below is divided back by ``scale**2``. ``alpha``, ``beta``, and ``nu``
+    are invariant to that scale. ``arch`` constrains ``alpha + beta < 1``.
 
     Args:
-        returns: Training log returns, in raw units.
+        returns: Log returns the fit is allowed to see.
 
     Returns:
-        Point estimates and ``success`` of 1 or 0. A failed fit still
-        returns the starting values so the caller can see them, with
-        ``success`` 0.
+        The ``arch`` result. Parameters in ``result.params`` are still in
+        the rescaled units.
     """
 
-    variance = float(np.mean(returns**2))
-    variance = max(variance, 1e-8)
+    model = arch_model(
+        np.asarray(returns, dtype=np.float64),
+        mean="Zero",
+        vol="GARCH",
+        p=1,
+        q=1,
+        dist="t",
+        rescale=True,
+    )
+    return model.fit(disp="off", show_warning=False)
 
-    def unpack(raw: np.ndarray) -> tuple[float, float, float, float]:
-        unconditional = variance * np.exp(raw[0])
-        persistence = 0.995 / (1.0 + np.exp(-raw[1]))
-        alpha_share = 1.0 / (1.0 + np.exp(-raw[2]))
-        alpha = persistence * alpha_share
-        beta = persistence - alpha
-        omega = unconditional * (1.0 - persistence)
-        nu = 2.05 + np.exp(raw[3])
-        return omega, alpha, beta, nu
 
-    def objective(raw: np.ndarray) -> float:
-        omega, alpha, beta, nu = unpack(raw)
-        sigma2 = _garch_variance(returns, omega, alpha, beta)
-        if not np.all(np.isfinite(sigma2)):
-            return 1e12
-        return _student_t_nll(returns[1:], sigma2[1:], nu)
+def _garch_params(fitted: object) -> dict[str, float]:
+    """Read original-unit GARCH parameters off an ``arch`` result."""
 
-    # Persistence near 0.95, a small alpha share, and nu around 8.
-    start = np.array([0.0, np.log(0.95 / 0.045), np.log(0.08 / 0.92), np.log(6.0)])
-    fitted = minimize(objective, start, method="L-BFGS-B", options={"maxiter": 200})
-    omega, alpha, beta, nu = unpack(fitted.x)
-    finite = bool(fitted.success) and np.isfinite(fitted.fun)
+    scale = float(fitted.scale)
+    omega = float(fitted.params["omega"]) / scale**2
+    alpha = float(fitted.params["alpha[1]"])
+    beta = float(fitted.params["beta[1]"])
+    nu = float(fitted.params["nu"])
+    sigma2_last = float(fitted.conditional_volatility[-1]) ** 2 / scale**2
+    # arch keeps alpha + beta below 1, but the sum can land a rounding
+    # step above 1. A slack of 1e-6 still rejects a genuinely explosive fit.
+    stationary = alpha >= 0.0 and beta >= 0.0 and (alpha + beta) < 1.0 + 1e-6 and nu > 2.0
+    converged = int(fitted.convergence_flag) == 0 and np.isfinite(sigma2_last)
     return {
-        "omega": float(omega),
-        "alpha": float(alpha),
-        "beta": float(beta),
-        "nu": float(nu),
-        "persistence": float(alpha + beta),
-        "success": 1.0 if finite else 0.0,
+        "omega": omega,
+        "alpha": alpha,
+        "beta": beta,
+        "nu": nu,
+        "persistence": alpha + beta,
+        "sigma2_last": sigma2_last,
+        "scale": scale,
+        "success": 1.0 if stationary and converged else 0.0,
     }
 
 
-def _garch_variance_forecast(
-    returns: np.ndarray, last_known: int, omega: float, alpha: float, beta: float
-) -> np.ndarray:
-    """Variance forecast that uses returns only through ``last_known``."""
+def fit_garch_student(returns: np.ndarray) -> dict[str, float]:
+    """Fit GARCH(1,1) with Student-t errors on the returns passed in.
 
-    history = returns[: last_known + 1]
-    filtered = _garch_variance(history, omega, alpha, beta)
-    sigma2 = np.empty(returns.shape[0], dtype=np.float64)
-    sigma2[: filtered.size] = filtered
-    if filtered.size == returns.size:
-        return sigma2
-    next_variance = omega + alpha * history[-1] ** 2 + beta * filtered[-1]
-    unconditional = omega / (1.0 - alpha - beta)
-    persistence = alpha + beta
-    for step, index in enumerate(range(filtered.size, returns.size)):
-        sigma2[index] = unconditional + (persistence**step) * (next_variance - unconditional)
-    return np.maximum(sigma2, 1e-12)
+    The estimates are in the original return units. ``sigma2_last`` is the
+    filtered variance of the last return. ``success`` is 1 when ``arch``
+    reports convergence, the variance is finite, and ``nu > 2``.
+
+    Args:
+        returns: Training log returns.
+
+    Returns:
+        Point estimates. A failed fit still returns the numbers ``arch``
+        produced, with ``success`` 0.
+    """
+
+    return _garch_params(_fit_arch_garch(returns))
+
+
+def garch_variance_leads(returns: np.ndarray, horizon: int) -> np.ndarray:
+    """Analytic GARCH variance of each future return, in original units.
+
+    Lead ``h`` (1-based) is the variance of the return ``h`` days after the
+    last entry of ``returns``:
+
+    ``v_1 = omega + alpha * r_T^2 + beta * sigma_T^2``
+
+    ``v_h = omega / (1 - alpha - beta) + (alpha + beta)^(h - 1) * (v_1 - omega / (1 - alpha - beta))``
+
+    ``arch`` returns those variances in rescaled units. This divides by
+    ``scale**2``.
+
+    Args:
+        returns: Returns the fit may use. The forecast origin is the last one.
+        horizon: Number of leads.
+
+    Returns:
+        Array of length ``horizon``. Entry ``h - 1`` is the lead-``h`` variance.
+    """
+
+    fitted = _fit_arch_garch(returns)
+    scale = float(fitted.scale)
+    forecast = fitted.forecast(horizon=horizon, method="analytic", reindex=False)
+    leads = np.asarray(forecast.variance, dtype=np.float64)[-1] / scale**2
+    return np.maximum(leads, 1e-18)
 
 
 def _predicted_log_rv(
@@ -452,7 +459,26 @@ def _predicted_log_rv(
     horizon: int,
     last_known: int,
 ) -> np.ndarray:
-    """Log RMS of each holdout window, using forecasts only after ``last_known``."""
+    """Log 20-day RMS, mixing known squares with a variance forecast.
+
+    Holdout step ``s`` is the log root mean square of returns
+    ``first_holdout + s`` through ``first_holdout + s + window - 1``.
+    That window is the same trailing window as the SLDS volatility target.
+    An index at or before ``last_known`` contributes the realized square.
+    A later index contributes ``variance`` at that index, which must already
+    be the forecast of that return's variance.
+
+    Args:
+        returns: Full return series, including the holdout.
+        variance: Forecast variance aligned to ``returns``.
+        window: Realized-volatility window.
+        first_holdout: Return index where the first holdout window starts.
+        horizon: Number of holdout steps.
+        last_known: Last return index the forecast may read.
+
+    Returns:
+        Log realized-volatility forecast, length ``horizon``.
+    """
 
     predicted = np.empty(horizon, dtype=np.float64)
     for step in range(horizon):
@@ -468,16 +494,140 @@ def _predicted_log_rv(
     return predicted
 
 
-def volatility_baseline_paths(series: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+def _simulated_log_rv(
+    returns: np.ndarray,
+    future_returns: np.ndarray,
+    window: int,
+    first_holdout: int,
+    horizon: int,
+    last_known: int,
+) -> np.ndarray:
+    """Log 20-day RMS on each simulated path.
+
+    ``future_returns`` has shape ``(simulations, leads)``. Column ``h - 1``
+    is a draw of the return at index ``last_known + h``. Known returns inside
+    a window stay at their realized values, so the band does not redraw the
+    training sample.
+
+    Args:
+        returns: Full return series.
+        future_returns: Simulated returns after ``last_known``.
+        window: Realized-volatility window.
+        first_holdout: Return index where the first holdout window starts.
+        horizon: Number of holdout steps.
+        last_known: Last return index treated as known.
+
+    Returns:
+        Array of shape ``(simulations, horizon)``.
+    """
+
+    draws = future_returns.shape[0]
+    log_paths = np.empty((draws, horizon), dtype=np.float64)
+    for step in range(horizon):
+        start = first_holdout + step
+        squares = np.empty((draws, window), dtype=np.float64)
+        for offset in range(window):
+            index = start + offset
+            if index <= last_known:
+                squares[:, offset] = returns[index] ** 2
+            else:
+                squares[:, offset] = future_returns[:, index - last_known - 1] ** 2
+        rms = np.sqrt(np.mean(squares, axis=1))
+        log_paths[:, step] = np.log(np.maximum(rms, 1e-12))
+    return log_paths
+
+
+def _garch_log_rv_forecast(
+    returns: np.ndarray,
+    last_known: int,
+    window: int,
+    first_holdout: int,
+    horizon: int,
+    simulations: int,
+    seed: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, float]]:
+    """Point forecast and 90% band of log realized volatility from one GARCH fit.
+
+    The point forecast plugs the analytic variance leads into
+    :func:`_predicted_log_rv`. The band simulates Student-t return paths
+    from the same fit and takes the 5th and 95th percentiles of the log
+    root mean square. Both use only ``returns[: last_known + 1]``.
+
+    Args:
+        returns: Full return series. Entries after ``last_known`` are ignored.
+        last_known: Last return index the fit may use.
+        window: Realized-volatility window.
+        first_holdout: Return index where the first holdout window starts.
+        horizon: Number of holdout steps.
+        simulations: Simulated paths in the band.
+        seed: Seed for those paths.
+
+    Returns:
+        Point forecast, lower band, upper band, and the parameter dict.
+        The three arrays are raw log realized volatility.
+    """
+
+    history = returns[: last_known + 1]
+    fitted = _fit_arch_garch(history)
+    params = _garch_params(fitted)
+    empty = np.full(horizon, np.nan)
+    if params["success"] != 1.0:
+        return empty, empty.copy(), empty.copy(), params
+    scale = float(fitted.scale)
+    analytic = fitted.forecast(horizon=horizon, method="analytic", reindex=False)
+    leads = np.asarray(analytic.variance, dtype=np.float64)[-1] / scale**2
+    needed = returns.shape[0] - (last_known + 1)
+    if int(leads.shape[0]) < needed:
+        raise RuntimeError("GARCH variance forecast is shorter than the holdout windows.")
+    variance = np.empty(returns.shape[0], dtype=np.float64)
+    for index in range(last_known + 1, returns.shape[0]):
+        variance[index] = leads[index - last_known - 1]
+    point = _predicted_log_rv(returns, variance, window, first_holdout, horizon, last_known)
+    # arch uses ``rng(size)`` for simulation paths. ``random_state`` only
+    # seeds the bootstrap method, so the band draws standardized Student-t
+    # shocks here. Dividing by sqrt(nu / (nu - 2)) gives variance 1, which
+    # is the scale arch's volatility recursion expects.
+    nu = float(params["nu"])
+    draws = np.random.RandomState(seed)
+
+    def student_rng(size: tuple[int, ...]) -> np.ndarray:
+        shocks = draws.standard_t(nu, size=size)
+        return shocks / np.sqrt(nu / (nu - 2.0))
+
+    simulated = fitted.forecast(
+        horizon=horizon,
+        method="simulation",
+        simulations=simulations,
+        rng=student_rng,
+        reindex=False,
+    )
+    future = np.asarray(simulated.simulations.values, dtype=np.float64)[0] / scale
+    log_paths = _simulated_log_rv(returns, future, window, first_holdout, horizon, last_known)
+    lower = np.percentile(log_paths, 5.0, axis=0)
+    upper = np.percentile(log_paths, 95.0, axis=0)
+    return point, lower, upper, params
+
+
+def volatility_baseline_paths(
+    series: dict[str, np.ndarray],
+    simulations: int = _GARCH_SIMULATIONS,
+    seed: int = _GARCH_SEED,
+) -> dict[str, np.ndarray]:
     """Trailing, EWMA(0.94), and GARCH(1,1)-t forecasts of log realized volatility.
 
-    All three are standardized with the training center and scale of the
-    volatility channel. The trailing forecast holds the last training
-    20-day value flat. EWMA and GARCH are fit on training returns only.
-    The first 19 holdout windows still contain known returns.
+    All three point forecasts are standardized with the training center and
+    scale of the volatility channel. The trailing forecast holds the last
+    training 20-day value flat. EWMA and GARCH see training returns only.
+    The GARCH point forecast is the log root mean square of the analytic
+    variance forecast. ``garch_lower`` and ``garch_upper`` are the 5th and
+    95th percentiles of simulated log root mean squares, standardized the
+    same way. The first ``window - 1`` holdout windows still contain known
+    returns.
 
     Args:
         series: Output of :func:`series_from_prices`.
+        simulations: Paths in the GARCH band.
+        seed: Seed for those paths.
 
     Returns:
         Holdout paths and the GARCH point estimates.
@@ -489,24 +639,23 @@ def volatility_baseline_paths(series: dict[str, np.ndarray]) -> dict[str, np.nda
     horizon = int(series["observations_hold"].shape[1])
     last_known = train_steps + window - 2
     center = float(series["center"][1])
-    scale = float(series["scale"][1])
+    vol_scale = float(series["scale"][1])
     ewma = ewma_variance_forecast(returns, last_known, 0.94)
-    garch = fit_garch_student(returns[: last_known + 1])
-    if garch["success"] == 1.0:
-        garch_variance = _garch_variance_forecast(
-            returns, last_known, garch["omega"], garch["alpha"], garch["beta"]
-        )
-        garch_log = _predicted_log_rv(
-            returns, garch_variance, window, train_steps, horizon, last_known
-        )
-    else:
-        garch_log = np.full(horizon, np.nan)
     ewma_log = _predicted_log_rv(returns, ewma, window, train_steps, horizon, last_known)
+    garch_log, garch_lower, garch_upper, garch = _garch_log_rv_forecast(
+        returns, last_known, window, train_steps, horizon, simulations, seed
+    )
     flat = np.full(horizon, float(series["observations_train"][0, -1, 1]))
+
+    def standardize(log_rv: np.ndarray) -> np.ndarray:
+        return (log_rv - center) / vol_scale
+
     return {
         "flat": flat,
-        "ewma": (ewma_log - center) / scale,
-        "garch": (garch_log - center) / scale,
+        "ewma": standardize(ewma_log),
+        "garch": standardize(garch_log),
+        "garch_lower": standardize(garch_lower),
+        "garch_upper": standardize(garch_upper),
         "garch_omega": np.array(garch["omega"]),
         "garch_alpha": np.array(garch["alpha"]),
         "garch_beta": np.array(garch["beta"]),
@@ -514,6 +663,36 @@ def volatility_baseline_paths(series: dict[str, np.ndarray]) -> dict[str, np.nda
         "garch_persistence": np.array(garch["persistence"]),
         "garch_success": np.array(garch["success"]),
     }
+
+
+def log_vol_winners(metrics: dict[str, float]) -> dict[int, str]:
+    """Name the lowest log-volatility RMSE at each reported lead.
+
+    A tie keeps every method that matches the minimum. The names are
+    ``SLDS``, ``trailing``, ``EWMA``, and ``GARCH``.
+
+    Args:
+        metrics: Output of :func:`forecast_metrics`.
+
+    Returns:
+        Map from lead time to the winning name or names.
+    """
+
+    labels = (("model", "SLDS"), ("flat", "trailing"), ("ewma", "EWMA"), ("garch", "GARCH"))
+    winners: dict[int, str] = {}
+    for horizon in _LOG_VOL_HORIZONS:
+        scores = []
+        for name, label in labels:
+            key = f"rmse_log_vol_{name}_h{horizon}"
+            if key not in metrics:
+                continue
+            scores.append((label, metrics[key]))
+        if not scores:
+            continue
+        best = min(score for _, score in scores)
+        tied = [label for label, score in scores if np.isclose(score, best)]
+        winners[horizon] = " and ".join(tied)
+    return winners
 
 
 def raw_log_rv(standardized: np.ndarray, center: float, scale: float) -> np.ndarray:
@@ -627,6 +806,15 @@ def forecast_metrics(
         metrics["garch_nu"] = float(baselines["garch_nu"])
         metrics["garch_persistence"] = float(baselines["garch_persistence"])
         metrics["garch_success"] = float(baselines["garch_success"])
+        if "garch_lower" in baselines:
+            lower_band = np.asarray(baselines["garch_lower"], dtype=np.float64)
+            upper_band = np.asarray(baselines["garch_upper"], dtype=np.float64)
+            inside_garch = (vol_hold >= lower_band) & (vol_hold <= upper_band)
+            metrics["coverage_garch"] = float(np.mean(inside_garch))
+            for horizon in _LOG_VOL_HORIZONS:
+                if horizon > vol_hold.size:
+                    continue
+                metrics[f"coverage_garch_h{horizon}"] = float(np.mean(inside_garch[:horizon]))
     for name, path in log_paths.items():
         metrics[f"rmse_log_vol_{name}"] = _rmse(path, log_hold)
         for horizon in _LOG_VOL_HORIZONS:
@@ -716,6 +904,9 @@ def save_plots(
     upper_log = raw_log_rv(upper[:, 1], center, scale)
     flat_log = raw_log_rv(baselines["flat"], center, scale)
     ewma_log = raw_log_rv(baselines["ewma"], center, scale)
+    garch_log = raw_log_rv(baselines["garch"], center, scale)
+    garch_lo = raw_log_rv(baselines["garch_lower"], center, scale)
+    garch_hi = raw_log_rv(baselines["garch_upper"], center, scale)
     panels = (
         (
             "annualized volatility (%)",
@@ -726,6 +917,9 @@ def save_plots(
             annualized_vol_percent(upper_log),
             annualized_vol_percent(flat_log),
             annualized_vol_percent(ewma_log),
+            annualized_vol_percent(garch_log),
+            annualized_vol_percent(garch_lo),
+            annualized_vol_percent(garch_hi),
         ),
         (
             "log 20-day realized volatility",
@@ -736,11 +930,27 @@ def save_plots(
             upper_log,
             flat_log,
             ewma_log,
+            garch_log,
+            garch_lo,
+            garch_hi,
         ),
     )
-    fig, axes = plt.subplots(2, 1, figsize=(8.4, 6.4), sharex=True)
-    for axis, panel in zip(axes, panels, strict=True):
-        name, train, hold, mean, band_low, band_high, flat, ewma = panel
+    fig, axes = plt.subplots(2, 1, figsize=(8.4, 6.6), sharex=True)
+    for index, panel in enumerate(panels):
+        axis = axes[index]
+        (
+            name,
+            train,
+            hold,
+            mean,
+            band_low,
+            band_high,
+            flat,
+            ewma,
+            garch,
+            garch_low,
+            garch_high,
+        ) = panel
         axis.plot(train_dates, train, color="#9aa0a6", lw=0.8, label="fit window")
         axis.plot(hold_dates, hold, color="#333333", lw=1.1, label="realized holdout")
         axis.fill_between(
@@ -748,15 +958,24 @@ def save_plots(
             band_low,
             band_high,
             color="#1f4e79",
-            alpha=0.22,
-            label="90% predictive band",
+            alpha=0.18,
+            label="SLDS 90% band",
         )
-        axis.plot(hold_dates, mean, color="#1f4e79", lw=1.3, label="predictive mean")
+        axis.plot(hold_dates, mean, color="#1f4e79", lw=1.3, label="SLDS mean")
+        axis.fill_between(
+            hold_dates,
+            garch_low,
+            garch_high,
+            color="#E45756",
+            alpha=0.12,
+            label="GARCH 90% band",
+        )
+        axis.plot(hold_dates, garch, color="#E45756", lw=1.1, ls="-.", label="GARCH-t")
         axis.plot(hold_dates, flat, color="#666666", lw=1.0, ls=":", label="trailing 20-day")
         axis.plot(hold_dates, ewma, color="#F58518", lw=1.1, ls="--", label="EWMA 0.94")
         axis.axvline(hold_dates[0], color="#888888", lw=0.8)
         axis.set_ylabel(name)
-    axes[0].legend(loc="upper right", frameon=False, ncol=2, fontsize=8)
+    axes[0].legend(loc="upper left", frameon=False, ncol=2, fontsize=7)
     axes[1].set_xlabel("date")
     axes[1].xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
     fig.suptitle(f"{asset_name} volatility forecast, 250-day holdout")
@@ -771,14 +990,19 @@ def save_plots(
         return np.sqrt(np.cumsum(error**2) / count)
 
     inside_vol = (hold_log >= lower_log) & (hold_log <= upper_log)
+    inside_garch = (hold_log >= garch_lo) & (hold_log <= garch_hi)
     # One series makes a single-day coverage bit a barcode. A 20-day
     # trailing fraction is the same indicator, smoothed. The prefix is
     # the expanding fraction until the window is full.
     window = min(20, hold_log.size)
     vol_cover = np.cumsum(inside_vol.astype(np.float64)) / count
+    garch_cover = np.cumsum(inside_garch.astype(np.float64)) / count
     if hold_log.size >= window:
         kernel = np.ones(window) / float(window)
         vol_cover[window - 1 :] = np.convolve(inside_vol.astype(np.float64), kernel, mode="valid")
+        garch_cover[window - 1 :] = np.convolve(
+            inside_garch.astype(np.float64), kernel, mode="valid"
+        )
     fig, axes = plt.subplots(2, 1, figsize=(8.4, 5.6), sharex=True)
     axes[0].plot(
         lead,
@@ -803,12 +1027,23 @@ def save_plots(
         ls="--",
         label="EWMA 0.94",
     )
+    axes[0].plot(
+        lead,
+        expanding_rmse(garch_log - hold_log),
+        color="#E45756",
+        lw=1.1,
+        ls="-.",
+        label="GARCH-t",
+    )
     for horizon in _LOG_VOL_HORIZONS:
         if horizon <= hold_log.size:
             axes[0].axvline(horizon, color="#cccccc", lw=0.7)
     axes[0].set_ylabel("RMSE of log volatility")
     axes[0].legend(frameon=False, fontsize=8)
-    axes[1].plot(lead, vol_cover, color="#1f4e79", lw=1.2, label="volatility, 20-day coverage")
+    axes[1].plot(lead, vol_cover, color="#1f4e79", lw=1.2, label="SLDS, 20-day coverage")
+    axes[1].plot(
+        lead, garch_cover, color="#E45756", lw=1.1, ls="-.", label="GARCH, 20-day coverage"
+    )
     axes[1].axhline(0.90, color="#888888", lw=0.8, ls="--")
     axes[1].set_ylabel("fraction in 90% band")
     axes[1].set_xlabel("lead time (days)")
@@ -853,6 +1088,9 @@ def run_forecast(path: Path, prefix: str, asset_name: str, sweeps: int) -> None:
         print(f"  {key:28s} {value:.6g}" if isinstance(value, float) else f"  {key:28s} {value}")
     print(f"  elapsed_sec                  {float(result['elapsed_sec']):.1f}")
     print(f"  figures                      {_IMG_DIR}")
+    print("winner, lowest RMSE of log volatility")
+    for horizon, name in log_vol_winners(metrics).items():
+        print(f"  lead {horizon:<4d} {name}")
 
 
 def main() -> None:

@@ -8,7 +8,7 @@ uv run pytest
 uv run python examples/smoke_slds.py
 ```
 
-`uv sync` installs the package and the `dev` group (pytest, ruff, pre-commit). The documentation group is separate:
+`uv sync` installs the package and the `dev` group (pytest, ruff, pre-commit, and the `examples` group). The volatility scripts use `arch` from that examples group. The documentation group is separate:
 
 ```bash
 uv sync --group docs

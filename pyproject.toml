@@ -19,10 +19,14 @@ dependencies = [
 keywords = ["bayesian-nonparametrics", "slds", "hidden-markov-model", "time-series"]
 
 [dependency-groups]
+examples = [
+    "arch>=5.3",
+]
 dev = [
     "pytest>=7",
     "ruff>=0.6",
     "pre-commit>=3",
+    { include-group = "examples" },
 ]
 docs = [
     "mkdocs>=1.6",

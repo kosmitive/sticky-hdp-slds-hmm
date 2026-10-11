@@ -16,13 +16,33 @@ The 2.35 rad release does not hold that rate. Its 90% band covers 78.8% of the h
 
 ![S&P 500 annualized and log 20-day realized volatility, 90% band, and the holdout](docs/img/sp500_forecast.png)
 
-`examples/sp500_forecast.py` and `examples/btc_forecast.py` forecast log 20-day realized volatility. The return is the second observation. The last 250 days are held out, and the prior was not fit to them. The baselines are the last 20-day value held flat, and EWMA with decay 0.94.
+`examples/sp500_forecast.py` and `examples/btc_forecast.py` forecast log 20-day realized volatility. The return is the second observation. The last 250 days are held out, and nothing was fit to them. The baselines are the last 20-day value held flat, EWMA with decay 0.94, and a GARCH(1,1) Student-t fit with `arch` on the training returns. The GARCH variance forecast is converted to the same log root-mean-square target. The table is RMSE of that log volatility. The lowest value on each row is the winner.
 
-On the S&P 500, RMSE of log volatility is 0.069, 0.082, 0.154, and 0.186 at leads of 1, 5, 20, and 60 days. The trailing value scores 0.094, 0.101, 0.178, and 0.181 on those same leads. EWMA scores 0.074, 0.041, 0.041, and 0.163. Over all 250 days the three are 0.228, 0.228, and 0.217. The 90% band covers the whole holdout, which means the band is wide.
+S&P 500:
 
-On bitcoin the same four leads are 0.037, 0.539, 0.589, and 0.369 for the model, 0.035, 0.553, 0.608, and 0.374 for the trailing value, and 0.018, 0.490, 0.527, and 0.330 for EWMA. Over 250 days those are 0.472, 0.428, and 0.418. The 90% band covers 79.2% of that holdout.
+| Lead (days) | SLDS | Trailing | EWMA 0.94 | GARCH-t |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 0.069 | 0.094 | 0.074 | 0.048 |
+| 5 | 0.082 | 0.101 | 0.041 | 0.064 |
+| 20 | 0.154 | 0.178 | 0.041 | 0.215 |
+| 60 | 0.186 | 0.181 | 0.163 | 0.451 |
+| 250 | 0.228 | 0.228 | 0.217 | 0.608 |
 
-The return forecast is close to unpredictable: 0.667 against 0.661 for predicting zero on the S&P 500, and 0.685 against 0.680 on bitcoin. Figures, the mode split, and the rest of the scores are on the [volatility page](https://kosmitive.github.io/sticky-hdp-slds-hmm/volatility/).
+GARCH wins day 1. EWMA wins every longer lead. Both 90% bands cover the whole holdout, so those bands are wide.
+
+Bitcoin:
+
+| Lead (days) | SLDS | Trailing | EWMA 0.94 | GARCH-t |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 0.037 | 0.035 | 0.018 | 0.004 |
+| 5 | 0.539 | 0.553 | 0.490 | 0.451 |
+| 20 | 0.589 | 0.608 | 0.527 | 0.396 |
+| 60 | 0.369 | 0.374 | 0.330 | 0.463 |
+| 250 | 0.472 | 0.428 | 0.418 | 1.086 |
+
+GARCH wins leads 1, 5, and 20. EWMA wins lead 60 and the full 250 days, where GARCH is the worst of the four. The SLDS 90% band covers 79.2% of that holdout. The GARCH band covers 94.0%.
+
+The return forecast is close to unpredictable: 0.667 against 0.661 for predicting zero on the S&P 500, and 0.685 against 0.680 on bitcoin. The conversion, the bands, and the mode split are on the [volatility page](https://kosmitive.github.io/sticky-hdp-slds-hmm/volatility/).
 
 Documentation: [https://kosmitive.github.io/sticky-hdp-slds-hmm/](https://kosmitive.github.io/sticky-hdp-slds-hmm/).
 
@@ -47,7 +67,7 @@ uv run python examples/smoke_slds.py
 uv run pre-commit install
 ```
 
-`uv sync` installs the package and the `dev` group (pytest, ruff, pre-commit). Add the docs group when you want the site:
+`uv sync` installs the package and the `dev` group (pytest, ruff, pre-commit, and the `examples` group). The volatility scripts use `arch` from that examples group. Add the docs group when you want the site:
 
 ```bash
 uv sync --group docs

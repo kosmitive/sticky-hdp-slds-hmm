@@ -8,12 +8,15 @@ import numpy as np
 from examples.btc_forecast import _DATA_PATH as _BTC_PATH
 from examples.sp500_forecast import (
     _DATA_PATH,
+    _predicted_log_rv,
     annualized_vol_percent,
     ewma_variance_forecast,
     fit_and_forecast,
     fit_garch_student,
     forecast_metrics,
+    garch_variance_leads,
     load_closes,
+    log_vol_winners,
     raw_log_rv,
     rolling_rms,
     series_from_prices,
@@ -84,6 +87,69 @@ def test_garch_student_fit_stays_stationary() -> None:
     assert fitted["beta"] >= 0.0
     assert fitted["persistence"] < 1.0
     assert fitted["nu"] > 2.0
+    assert fitted["scale"] >= 1.0
+
+
+def test_garch_variance_leads_match_the_recursion() -> None:
+    rng = np.random.default_rng(3)
+    returns = rng.normal(0.0, 0.01, size=500)
+    fitted = fit_garch_student(returns)
+    leads = garch_variance_leads(returns, 60)
+    one_step = (
+        fitted["omega"]
+        + fitted["alpha"] * returns[-1] ** 2
+        + fitted["beta"] * fitted["sigma2_last"]
+    )
+    assert np.isclose(leads[0], one_step)
+    unconditional = fitted["omega"] / (1.0 - fitted["persistence"])
+    for horizon in (5, 20, 60):
+        expected = unconditional + fitted["persistence"] ** (horizon - 1) * (
+            one_step - unconditional
+        )
+        assert np.isclose(leads[horizon - 1], expected, rtol=1e-8)
+
+
+def test_log_rv_uses_realized_squares_then_forecast_variance() -> None:
+    returns = np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6])
+    variance = np.zeros_like(returns)
+    variance[4] = 0.09
+    variance[5] = 0.16
+    predicted = _predicted_log_rv(returns, variance, 3, 2, 2, 3)
+    first = np.log(np.sqrt(np.mean([0.3**2, 0.4**2, 0.09])))
+    second = np.log(np.sqrt(np.mean([0.4**2, 0.09, 0.16])))
+    assert np.allclose(predicted, [first, second])
+
+
+def test_garch_forecast_ignores_returns_after_the_training_cut() -> None:
+    rng = np.random.default_rng(2)
+    closes = 100.0 * np.exp(np.cumsum(rng.normal(0.0, 0.01, size=120)))
+    series = series_from_prices(_dates(closes.size), closes, holdout=15, window=5, seed=4)
+    original = volatility_baseline_paths(series, simulations=40, seed=1)
+    corrupted = dict(series)
+    corrupted["returns"] = np.array(series["returns"], copy=True)
+    last_known = int(series["observations_train"].shape[1]) + int(series["window"]) - 2
+    corrupted["returns"][last_known + 1 :] = 0.25
+    refit = volatility_baseline_paths(corrupted, simulations=40, seed=1)
+    assert np.allclose(original["garch"], refit["garch"])
+    assert np.allclose(original["garch_lower"], refit["garch_lower"])
+    assert np.allclose(original["garch_upper"], refit["garch_upper"])
+    assert np.all(original["garch_lower"] < original["garch_upper"])
+
+
+def test_log_vol_winners_names_the_lowest_rmse() -> None:
+    metrics = {
+        "rmse_log_vol_model_h1": 0.2,
+        "rmse_log_vol_flat_h1": 0.1,
+        "rmse_log_vol_ewma_h1": 0.3,
+        "rmse_log_vol_garch_h1": 0.05,
+        "rmse_log_vol_model_h5": 0.4,
+        "rmse_log_vol_flat_h5": 0.4,
+        "rmse_log_vol_ewma_h5": 0.5,
+        "rmse_log_vol_garch_h5": 0.4,
+    }
+    winners = log_vol_winners(metrics)
+    assert winners[1] == "GARCH"
+    assert winners[5] == "SLDS and trailing and GARCH"
 
 
 def test_volatility_baselines_do_not_read_the_holdout_scale() -> None:
@@ -128,6 +194,8 @@ def test_tiny_synthetic_forecast_is_finite() -> None:
     assert np.isfinite(metrics["rmse_log_vol_model_h1"])
     assert np.isfinite(metrics["rmse_log_vol_flat_h5"])
     assert np.isfinite(metrics["rmse_log_vol_ewma_h5"])
+    assert np.isfinite(metrics["rmse_log_vol_garch_h5"])
+    assert 0.0 <= metrics["coverage_garch_h5"] <= 1.0
     assert "rmse_log_vol_model_h20" not in metrics
     assert 0.0 <= metrics["coverage_vol"] <= 1.0
     assert 0.0 <= metrics["coverage_vol_h5"] <= 1.0

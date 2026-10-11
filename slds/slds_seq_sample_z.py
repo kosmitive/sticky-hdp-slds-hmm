@@ -1,31 +1,7 @@
-# MIT License
-# 
-# Copyright (c) 2018 Markus Semmler
-# 
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-
-
 import numpy as np
 
 
 class StickyHDPSLDSHMMModelSeqZMixin:
-
     def slds_post_seq_sample_z(
         self,
         forward_gain_mat: np.ndarray,
@@ -40,24 +16,22 @@ class StickyHDPSLDSHMMModelSeqZMixin:
         The first mode is scored under ``beta``; every later mode uses ``pi``.
         """
 
-        max_state, _ = self.hdp_params[4].shape
+        max_state, _ = self.hdp.pi.shape
         num_traces, num_steps, _ = self.y.shape
 
         # iterate backwards
-        beta = self.hdp_params[3]
-        pi = self.hdp_params[4]
+        beta = self.hdp.beta
+        pi = self.hdp.pi
         for d in range(num_traces):
             for t in reversed(range(num_steps)):
-
                 # Forward information at this index is about x_{t-1} and does
                 # not depend on the candidate mode.
                 inv_mat_gain = np.linalg.inv(forward_gain_mat[d, t])
                 f = np.zeros(max_state, np.float64)
                 for k in range(max_state):
-
                     # Eq. (39)–(40): both A and Sigma belong to the candidate mode.
-                    dyn_mat = self.slds_params[0][k]
-                    dyn_var_mat = self.slds_params[1][k]
+                    dyn_mat = self.dynamics.A[k]
+                    dyn_var_mat = self.dynamics.Sigma[k]
                     b_val = dyn_mat @ inv_mat_gain
                     c_val = b_val @ dyn_mat.transpose()
                     inv_p_mat_k = dyn_var_mat + c_val
@@ -97,4 +71,3 @@ class StickyHDPSLDSHMMModelSeqZMixin:
                     shifted = np.exp(f - np.max(f[finite]))
                     probs = shifted / np.sum(shifted)
                 self.z[d, t] = np.random.choice(np.arange(max_state), p=probs)
-

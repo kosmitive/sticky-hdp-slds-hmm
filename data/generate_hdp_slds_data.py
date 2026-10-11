@@ -1,42 +1,29 @@
-# MIT License
-# 
-# Copyright (c) 2018 Markus Semmler
-# 
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-
-
 from os.path import join
 
 import numpy as np
-
-from data.generate_hdp_slds_groundtruth import generate_hdp_slds_groundtrouth
 from misc.output import print_line
 from model.ard_prior import ARDPrior
 from model.mniw_prior import MNIWPrior
 from model.sticky_hdp_prior import StickyHDPPrior
 from model.sticky_hdp_slds_hmm import StickyHDPSLDSHMMModel
 
+from data.generate_hdp_slds_groundtruth import generate_hdp_slds_groundtrouth
 
-def generate_mniw_data(root='./data_packs', name='hdp_slds_mniw'):
+# Recorded seed for the checked-in packs. Each pack is drawn from this seed
+# on its own, so regenerating one pack does not depend on the other.
+DATA_PACK_SEED = 0
+
+
+def _record_seed(folder):
+    with open(join(folder, "SEED"), "w", encoding="utf-8") as handle:
+        handle.write(f"{DATA_PACK_SEED}\n")
+
+
+def generate_mniw_data(root="./data_packs", name="hdp_slds_mniw"):
 
     print_line()
     print_line("Generate HDP-SLDS-HMM using MNIW prior")
+    np.random.seed(DATA_PACK_SEED)
 
     # some general settings
     num_traces = 50
@@ -46,7 +33,7 @@ def generate_mniw_data(root='./data_packs', name='hdp_slds_mniw'):
     max_z = 5
 
     # projection
-    C = np.hstack((np.eye(od), np.zeros([od, ld-od])))
+    C = np.hstack((np.eye(od), np.zeros([od, ld - od])))
 
     # setup hdp prior
     alpha_kappa0 = [15.0, 3.0]
@@ -65,7 +52,7 @@ def generate_mniw_data(root='./data_packs', name='hdp_slds_mniw'):
     R0 = 1e-6 * np.eye(od)
 
     # create priors
-    hdp_prior = StickyHDPPrior(max_z, alpha_kappa0, rho0, gamma0, 'uniform')
+    hdp_prior = StickyHDPPrior(max_z, alpha_kappa0, rho0, gamma0, "uniform")
     mniw_prior = MNIWPrior(M, K, n0, S0)
     latent_prior = P0
     emission_prior = [r0, R0]
@@ -74,12 +61,14 @@ def generate_mniw_data(root='./data_packs', name='hdp_slds_mniw'):
     folder = join(root, name)
     model = StickyHDPSLDSHMMModel(ld, od, hdp_prior, mniw_prior, latent_prior, emission_prior, C)
     generate_hdp_slds_groundtrouth(folder, num_traces, num_steps, model)
+    _record_seed(folder)
 
 
-def generate_ard_data(root='./data_packs', name='hdp_slds_ard'):
+def generate_ard_data(root="./data_packs", name="hdp_slds_ard"):
 
     print_line()
     print_line("Generate HDP-SLDS-HMM using ARD prior")
+    np.random.seed(DATA_PACK_SEED)
 
     # some general settings
     num_traces = 50
@@ -89,7 +78,7 @@ def generate_ard_data(root='./data_packs', name='hdp_slds_ard'):
     max_z = 5
 
     # projection
-    C = np.hstack((np.eye(od), np.zeros([od, ld-od])))
+    C = np.hstack((np.eye(od), np.zeros([od, ld - od])))
 
     # setup hdp prior
     alpha_kappa0 = [15.0, 3.0]
@@ -107,7 +96,7 @@ def generate_ard_data(root='./data_packs', name='hdp_slds_ard'):
     R0 = 1e-6 * np.eye(od)
 
     # create priors
-    hdp_prior = StickyHDPPrior(max_z, alpha_kappa0, rho0, gamma0, 'uniform')
+    hdp_prior = StickyHDPPrior(max_z, alpha_kappa0, rho0, gamma0, "uniform")
     ard_prior = ARDPrior(alpha0, n0, S0)
     latent_prior = P0
     emission_prior = [r0, R0]
@@ -116,8 +105,9 @@ def generate_ard_data(root='./data_packs', name='hdp_slds_ard'):
     folder = join(root, name)
     model = StickyHDPSLDSHMMModel(ld, od, hdp_prior, ard_prior, latent_prior, emission_prior, C)
     generate_hdp_slds_groundtrouth(folder, num_traces, num_steps, model)
+    _record_seed(folder)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     generate_ard_data()
     generate_mniw_data()

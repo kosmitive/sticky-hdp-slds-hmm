@@ -9,14 +9,15 @@ from __future__ import annotations
 import tempfile
 
 import numpy as np
-from scipy import stats
-
 from examples.smoke_slds import run_smoke
 from model.ard_prior import ARDPrior
 from model.gt_sticky_hdp_slds_hmm import StickyHDPSLDSHMMConfiguration
 from model.mniw_prior import MNIWPrior
+from model.state import DynamicsState, StickyHDPState
 from model.sticky_hdp_prior import StickyHDPPrior
 from model.sticky_hdp_slds_hmm import StickyHDPSLDSHMMModel
+from scipy import stats
+from slds.regression import split_regression_pairs
 
 
 def _model(
@@ -51,8 +52,8 @@ def test_stick_breaking_accepts_a_vector_base_measure() -> None:
 
     model = _model()
     model.init_params()
-    beta = model.hdp_params[3]
-    pi = model.hdp_params[4]
+    beta = model.hdp.beta
+    pi = model.hdp.pi
     assert beta.shape == (2,)
     assert pi.shape == (2, 2)
     assert np.allclose(beta.sum(), 1.0)
@@ -63,7 +64,7 @@ def test_first_customer_always_opens_a_table() -> None:
     """Algorithm 1 counts the first customer with the seat index starting at 0."""
 
     model = _model()
-    model.hdp_params = [1.0, 0.0, 1.0, np.array([0.5, 0.5]), np.eye(2)]
+    model.hdp = StickyHDPState.from_sequence([1.0, 0.0, 1.0, np.array([0.5, 0.5]), np.eye(2)])
     model.transitions = np.zeros((2, 2))
     model.transitions[0, 0] = 1
     draws = []
@@ -78,7 +79,9 @@ def test_table_count_matches_chinese_restaurant_expectation() -> None:
 
     model = _model()
     concentration = 0.25
-    model.hdp_params = [1.0, 0.0, 1.0, np.array([concentration, 1.0 - concentration]), np.eye(2)]
+    model.hdp = StickyHDPState.from_sequence(
+        [1.0, 0.0, 1.0, np.array([concentration, 1.0 - concentration]), np.eye(2)]
+    )
     # rho = 0 so kappa = 0 and the self-transition term is alpha * beta_0.
     # alpha = (1 - rho) * alpha_kappa = 1, beta_0 = 0.25, term = 0.25.
     count = 8
@@ -109,7 +112,7 @@ def test_empty_rows_are_skipped_when_sampling_alpha_kappa(monkeypatch) -> None:
     model = _model()
     model.m = np.zeros((2, 2))
     model.transitions = np.zeros((2, 2))
-    model.hdp_params = [1.0, 0.5, 1.0, np.full(2, 0.5), np.eye(2)]
+    model.hdp = StickyHDPState.from_sequence([1.0, 0.5, 1.0, np.full(2, 0.5), np.eye(2)])
     model.sample_post_hdp_alpha_kappa()
     assert calls["beta"] == 0
     # Posterior collapses to the Gamma(2, rate=1) prior.
@@ -119,7 +122,7 @@ def test_empty_rows_are_skipped_when_sampling_alpha_kappa(monkeypatch) -> None:
 def test_auxiliary_override_counts_do_not_replace_emission_noise() -> None:
     model = _model()
     model.w = np.ones((3, 4, 2))
-    model.hdp_params = [1.0, 0.5, 1.0, np.full(2, 0.5), np.full((2, 2), 0.5)]
+    model.hdp = StickyHDPState.from_sequence([1.0, 0.5, 1.0, np.full(2, 0.5), np.full((2, 2), 0.5)])
     model.transitions = np.eye(2)
     model.sample_post_auxiliary_vars()
     assert model.w.shape == (3, 4, 2)
@@ -161,7 +164,9 @@ def test_regression_counts_ignore_the_initial_state(monkeypatch) -> None:
     model = _model(n0=6)
     model.z = np.array([[0, 1, 1]])
     model.x = np.ones((1, 3, 2))
-    model.slds_params = [np.zeros((2, 2, 2)), np.repeat(np.eye(2)[None, :, :], 2, axis=0)]
+    model.dynamics = DynamicsState.from_sample(
+        [np.zeros((2, 2, 2)), np.repeat(np.eye(2)[None, :, :], 2, axis=0)]
+    )
     model.slds_post_mniw_dynamics_param_sampling()
     # Mode 0 occurs only at t = 0, so it contributes no regression pair.
     assert captured[0] == 6
@@ -185,11 +190,13 @@ def test_mniw_posterior_concentrates_on_the_dynamics() -> None:
     model.dyn_prior.S0 = 0.01 * np.eye(ld)
     model.z = np.zeros((1, steps), dtype=np.int64)
     model.x = x
-    model.slds_params = [np.zeros((1, ld, ld)), np.repeat(sigma[None, :, :], 1, axis=0)]
+    model.dynamics = DynamicsState.from_sample(
+        [np.zeros((1, ld, ld)), np.repeat(sigma[None, :, :], 1, axis=0)]
+    )
     samples = []
     for _ in range(25):
         model.slds_post_mniw_dynamics_param_sampling()
-        samples.append(model.slds_params[0][0].copy())
+        samples.append(model.dynamics.A[0].copy())
     stacked = np.stack(samples)
     assert np.linalg.norm(stacked.mean(axis=0) - true_a) < 0.3
     assert stacked[:, 0, 0].std() < 0.25
@@ -204,17 +211,19 @@ def test_ard_gamma_prior_uses_scale_not_location() -> None:
 
 def test_ard_precision_shrinks_the_selected_column() -> None:
     model = _model(max_z=1, alpha0=(1.0, 1.0))
-    model.slds_params = [
-        np.zeros((1, 2, 2)),
-        np.repeat(np.eye(2)[None, :, :], 1, axis=0),
-        np.array([[1.0e6, 1.0e-3]]),
-    ]
+    model.dynamics = DynamicsState.from_sample(
+        [
+            np.zeros((1, 2, 2)),
+            np.repeat(np.eye(2)[None, :, :], 1, axis=0),
+            np.array([[1.0e6, 1.0e-3]]),
+        ]
+    )
     empty = [np.zeros((2, 0))]
     samples = []
     sampler = model._StickyHDPSLDSHMMModelARDMixin__slds_post_ard_dynamics_sample_dyn_mat
     for _ in range(40):
         sampler(empty, empty)
-        samples.append(model.slds_params[0][0].copy())
+        samples.append(model.dynamics.A[0].copy())
     stacked = np.stack(samples)
     assert stacked[:, :, 0].std() < 0.05
     assert stacked[:, :, 1].std() > 1.0
@@ -240,15 +249,16 @@ def test_ard_posterior_keeps_column_orientation(monkeypatch) -> None:
         x[0, t] = true_a @ x[0, t - 1]
     model.x = x
     model.z = np.zeros((1, steps), dtype=np.int64)
-    model.slds_params = [
-        np.zeros((1, 2, 2)),
-        np.repeat(np.eye(2)[None, :, :], 1, axis=0),
-        np.full((1, 2), 1.0e-8),
-    ]
-    model._StickyHDPSLDSHMMModelARDMixin__slds_post_ard_dynamics_sample_dyn_mat(
-        *model._StickyHDPSLDSHMMModelMNIWMixin__split_into_regression_problems()[:2]
+    model.dynamics = DynamicsState.from_sample(
+        [
+            np.zeros((1, 2, 2)),
+            np.repeat(np.eye(2)[None, :, :], 1, axis=0),
+            np.full((1, 2), 1.0e-8),
+        ]
     )
-    estimate = model.slds_params[0][0]
+    parents, children, _counts = split_regression_pairs(model.z, model.x, model.hdp_prior.max_z)
+    model._StickyHDPSLDSHMMModelARDMixin__slds_post_ard_dynamics_sample_dyn_mat(parents, children)
+    estimate = model.dynamics.A[0]
     assert np.allclose(estimate, true_a, atol=1e-2)
     assert np.linalg.norm(estimate - true_a) < np.linalg.norm(estimate - true_a.T)
 
@@ -264,21 +274,25 @@ def test_ard_alpha_posterior_uses_half_the_sum_of_squares(monkeypatch) -> None:
     monkeypatch.setattr("slds.slds_ard_prior_sample.np.random.gamma", _gamma)
     model = _model(max_z=1, alpha0=(4.0, 2.0))
     matrix = np.array([[3.0, 0.0], [0.0, 4.0]])
-    model.slds_params = [np.array([matrix]), np.array([np.eye(2)]), np.ones((1, 2))]
+    model.dynamics = DynamicsState.from_sample(
+        [np.array([matrix]), np.array([np.eye(2)]), np.ones((1, 2))]
+    )
     model._StickyHDPSLDSHMMModelARDMixin__slds_post_ard_dynamics_sample_alpha()
-    column_squares = np.sum(matrix ** 2, axis=0)
+    column_squares = np.sum(matrix**2, axis=0)
     assert captured["shape"] == 4.0 + 1.0
     assert np.allclose(captured["scale"], 1.0 / (2.0 + 0.5 * column_squares))
 
 
 def test_ard_alpha_survives_store_and_load() -> None:
     model = _model(alpha0=(2.0, 1.0))
-    model.slds_params = [
-        np.zeros((2, 2, 2)),
-        np.repeat(0.1 * np.eye(2)[None, :, :], 2, axis=0),
-        np.arange(4, dtype=float).reshape(2, 2),
-    ]
-    model.hdp_params = [1.0, 0.5, 1.0, np.full(2, 0.5), np.full((2, 2), 0.5)]
+    model.dynamics = DynamicsState.from_sample(
+        [
+            np.zeros((2, 2, 2)),
+            np.repeat(0.1 * np.eye(2)[None, :, :], 2, axis=0),
+            np.arange(4, dtype=float).reshape(2, 2),
+        ]
+    )
+    model.hdp = StickyHDPState.from_sequence([1.0, 0.5, 1.0, np.full(2, 0.5), np.full((2, 2), 0.5)])
     model.R = 0.1 * np.eye(2)
     model.z = np.zeros((1, 3), dtype=np.int64)
     model.x = np.zeros((1, 3, 2))
@@ -288,17 +302,21 @@ def test_ard_alpha_survives_store_and_load() -> None:
     with tempfile.TemporaryDirectory() as folder:
         model.store(folder)
         loaded = StickyHDPSLDSHMMModel.load(folder)
-    assert len(loaded.slds_params) == 3
-    assert np.allclose(loaded.slds_params[2], model.slds_params[2])
+    assert loaded.dynamics.alpha is not None
+    assert np.allclose(loaded.dynamics.alpha, model.dynamics.alpha)
 
 
 def test_log_likelihood_adds_every_mode_and_the_initial_state() -> None:
     model = _model()
-    model.slds_params = [
-        np.stack([0.5 * np.eye(2), -0.2 * np.eye(2)]),
-        np.repeat(0.2 * np.eye(2)[None, :, :], 2, axis=0),
-    ]
-    model.hdp_params = [1.0, 0.5, 1.0, np.array([0.7, 0.3]), np.array([[0.8, 0.2], [0.4, 0.6]])]
+    model.dynamics = DynamicsState.from_sample(
+        [
+            np.stack([0.5 * np.eye(2), -0.2 * np.eye(2)]),
+            np.repeat(0.2 * np.eye(2)[None, :, :], 2, axis=0),
+        ]
+    )
+    model.hdp = StickyHDPState.from_sequence(
+        [1.0, 0.5, 1.0, np.array([0.7, 0.3]), np.array([[0.8, 0.2], [0.4, 0.6]])]
+    )
     model.R = 0.3 * np.eye(2)
     model.C = np.eye(2)
     model.x = np.array([[[0.0, 0.0], [1.0, -1.0], [0.2, 0.4]]])
@@ -308,14 +326,16 @@ def test_log_likelihood_adds_every_mode_and_the_initial_state() -> None:
     latent = 0.0
     for t in range(1, 3):
         mode = int(model.z[0, t])
-        mean = model.slds_params[0][mode] @ model.x[0, t - 1]
-        latent += stats.multivariate_normal.logpdf(model.x[0, t], mean, model.slds_params[1][mode])
+        mean = model.dynamics.A[mode] @ model.x[0, t - 1]
+        latent += stats.multivariate_normal.logpdf(model.x[0, t], mean, model.dynamics.Sigma[mode])
     emission = 0.0
     for t in range(3):
-        emission += stats.multivariate_normal.logpdf(model.y[0, t], model.C @ model.x[0, t], model.R)
+        emission += stats.multivariate_normal.logpdf(
+            model.y[0, t], model.C @ model.x[0, t], model.R
+        )
     modes = np.log(0.7)
-    modes += np.log(model.hdp_params[4][0, 1])
-    modes += np.log(model.hdp_params[4][1, 0])
+    modes += np.log(model.hdp.pi[0, 1])
+    modes += np.log(model.hdp.pi[1, 0])
     assert np.allclose(model.calc_log_likelihood(), latent + emission + modes)
 
 
@@ -326,13 +346,15 @@ def test_forward_filter_starts_at_the_prior_precision() -> None:
     model.R = 0.5 * np.eye(2)
     model.z = np.zeros((1, 1), dtype=np.int64)
     model.y = np.array([[[0.3, -0.1]]])
-    model.slds_params = [np.array([0.5 * np.eye(2)]), np.array([0.2 * np.eye(2)])]
+    model.dynamics = DynamicsState.from_sample(
+        [np.array([0.5 * np.eye(2)]), np.array([0.2 * np.eye(2)])]
+    )
     mats, vecs = model.slds_forward_kalman_filter_gains()
     assert np.allclose(mats[0, 0], np.linalg.inv(model.latent_prior))
 
     precision = np.linalg.inv(model.latent_prior)
-    dyn = model.slds_params[0][0]
-    noise = model.slds_params[1][0]
+    dyn = model.dynamics.A[0]
+    noise = model.dynamics.Sigma[0]
     predicted = np.linalg.inv(noise + dyn @ np.linalg.inv(precision) @ dyn.T)
     updated = predicted + model.C.T @ np.linalg.inv(model.R) @ model.C
     info = model.C.T @ np.linalg.inv(model.R) @ model.y[0, 0]
@@ -344,23 +366,27 @@ def test_block_mode_sampler_matches_the_two_step_posterior() -> None:
     model = _model()
     beta = np.array([0.65, 0.35])
     pi = np.array([[0.8, 0.2], [0.3, 0.7]])
-    model.hdp_params = [1.0, 0.5, 1.0, beta, pi]
-    model.slds_params = [
-        np.stack([0.9 * np.eye(2), -0.4 * np.eye(2)]),
-        np.repeat(0.05 * np.eye(2)[None, :, :], 2, axis=0),
-    ]
+    model.hdp = StickyHDPState.from_sequence([1.0, 0.5, 1.0, beta, pi])
+    model.dynamics = DynamicsState.from_sample(
+        [
+            np.stack([0.9 * np.eye(2), -0.4 * np.eye(2)]),
+            np.repeat(0.05 * np.eye(2)[None, :, :], 2, axis=0),
+        ]
+    )
     model.x = np.array([[[0.2, -0.1], [0.15, -0.05]]])
     model.y = model.x.copy()
     model.z = np.zeros((1, 2), dtype=np.int64)
 
-    lik = np.array([
-        stats.multivariate_normal.pdf(
-            model.x[0, 1],
-            model.slds_params[0][k] @ model.x[0, 0],
-            model.slds_params[1][k],
-        )
-        for k in range(2)
-    ])
+    lik = np.array(
+        [
+            stats.multivariate_normal.pdf(
+                model.x[0, 1],
+                model.dynamics.A[k] @ model.x[0, 0],
+                model.dynamics.Sigma[k],
+            )
+            for k in range(2)
+        ]
+    )
     joint = np.zeros((2, 2))
     for i in range(2):
         for j in range(2):
@@ -382,17 +408,19 @@ def test_sequential_sampler_uses_the_candidate_dynamics() -> None:
     model.latent_prior = 0.05 * np.eye(2)
     model.C = np.eye(2)
     model.R = 0.01 * np.eye(2)
-    model.hdp_params = [1.0, 0.2, 1.0, np.full(2, 0.5), np.full((2, 2), 0.5)]
-    model.slds_params = [
-        np.stack([0.95 * np.eye(2), -0.95 * np.eye(2)]),
-        np.repeat(0.01 * np.eye(2)[None, :, :], 2, axis=0),
-    ]
+    model.hdp = StickyHDPState.from_sequence([1.0, 0.2, 1.0, np.full(2, 0.5), np.full((2, 2), 0.5)])
+    model.dynamics = DynamicsState.from_sample(
+        [
+            np.stack([0.95 * np.eye(2), -0.95 * np.eye(2)]),
+            np.repeat(0.01 * np.eye(2)[None, :, :], 2, axis=0),
+        ]
+    )
     steps = 6
     x = np.zeros((1, steps, 2))
     x[0, 0] = rng.normal(scale=0.05, size=2)
     for t in range(1, steps):
-        x[0, t] = model.slds_params[0][0] @ x[0, t - 1]
-        x[0, t] += rng.multivariate_normal(np.zeros(2), model.slds_params[1][0])
+        x[0, t] = model.dynamics.A[0] @ x[0, t - 1]
+        x[0, t] += rng.multivariate_normal(np.zeros(2), model.dynamics.Sigma[0])
     model.x = x
     model.y = x + rng.normal(scale=0.05, size=x.shape)
     model.z = np.ones((1, steps), dtype=np.int64)
@@ -411,11 +439,13 @@ def test_block_state_sampler_tracks_a_low_noise_trajectory() -> None:
     model.latent_prior = 0.05 * np.eye(2)
     model.C = np.eye(2)
     model.R = 0.01 * np.eye(2)
-    model.slds_params = [
-        np.array([0.8 * np.eye(2)]),
-        np.array([0.01 * np.eye(2)]),
-    ]
-    model.hdp_params = [1.0, 0.5, 1.0, np.array([1.0]), np.array([[1.0]])]
+    model.dynamics = DynamicsState.from_sample(
+        [
+            np.array([0.8 * np.eye(2)]),
+            np.array([0.01 * np.eye(2)]),
+        ]
+    )
+    model.hdp = StickyHDPState.from_sequence([1.0, 0.5, 1.0, np.array([1.0]), np.array([[1.0]])])
     steps = 8
     x = np.zeros((1, steps, 2))
     x[0, 0] = rng.normal(scale=0.05, size=2)
@@ -435,8 +465,10 @@ def test_block_state_sampler_tracks_a_low_noise_trajectory() -> None:
 
 def test_rounds_hdp_is_stored_on_its_own_field() -> None:
     gt = _model()
-    gt.slds_params = [np.zeros((2, 2, 2)), np.repeat(np.eye(2)[None], 2, axis=0)]
-    gt.hdp_params = [1.0, 0.5, 1.0, np.full(2, 0.5), np.full((2, 2), 0.5)]
+    gt.dynamics = DynamicsState.from_sample(
+        [np.zeros((2, 2, 2)), np.repeat(np.eye(2)[None], 2, axis=0)]
+    )
+    gt.hdp = StickyHDPState.from_sequence([1.0, 0.5, 1.0, np.full(2, 0.5), np.full((2, 2), 0.5)])
     gt.R = np.eye(2)
     gt.z = np.zeros((1, 2), dtype=np.int64)
     gt.x = np.zeros((1, 2, 2))
@@ -468,8 +500,12 @@ def test_rounds_hdp_is_stored_on_its_own_field() -> None:
 
 def test_simulated_emission_noise_matches_the_observations() -> None:
     model = _model()
-    model.slds_params = [np.stack([0.4 * np.eye(2), 0.2 * np.eye(2)]), np.repeat(0.1 * np.eye(2)[None], 2, axis=0)]
-    model.hdp_params = [1.0, 0.8, 1.0, np.full(2, 0.5), np.array([[0.9, 0.1], [0.2, 0.8]])]
+    model.dynamics = DynamicsState.from_sample(
+        [np.stack([0.4 * np.eye(2), 0.2 * np.eye(2)]), np.repeat(0.1 * np.eye(2)[None], 2, axis=0)]
+    )
+    model.hdp = StickyHDPState.from_sequence(
+        [1.0, 0.8, 1.0, np.full(2, 0.5), np.array([[0.9, 0.1], [0.2, 0.8]])]
+    )
     model.R = 0.05 * np.eye(2)
     model.simulate(3, 5, init=False)
     assert model.y.shape == (3, 5, 2)

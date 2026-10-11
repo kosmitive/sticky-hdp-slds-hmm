@@ -1,28 +1,4 @@
-# MIT License
-# 
-# Copyright (c) 2018 Markus Semmler
-# 
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-
-
 import numpy as np
-from misc.disc_sample import sample_cat
 
 
 def stick_breaking_construction(gamma, k_max=10000):
@@ -69,7 +45,7 @@ def stick_breaking_construction_dp(alpha, base_measure, num_modes, k_max=10000):
     # String names are not arrays. Comparing an array with ``==`` raises
     # in current NumPy and used to make ``max_likely_sample`` crash.
     # ``if`` / ``elif`` keeps this valid on the declared Python 3.9 floor.
-    if isinstance(base_measure, str) and base_measure == 'uniform':
+    if isinstance(base_measure, str) and base_measure == "uniform":
         base_measure = np.ones(num_modes) / num_modes
     elif isinstance(base_measure, str):
         raise ValueError(f"Unknown base measure {base_measure!r}.")
@@ -89,7 +65,9 @@ def stick_breaking_construction_dp(alpha, base_measure, num_modes, k_max=10000):
     return m_beta / np.sum(m_beta)
 
 
-def stick_breaking_construction_sticky_hdp(alpha, kappa, gamma, num_modes, base_measure='uniform', k_max=10000):
+def stick_breaking_construction_sticky_hdp(
+    alpha, kappa, gamma, num_modes, base_measure="uniform", k_max=10000
+):
     """Creates a stick-breaking construction of a sticky hierarchical dirichlet prior. It
     basically uses kappa to add some self-excitement to each state, while alpha and gamma
     control the transition finally chosen. It is chosen as:
@@ -113,7 +91,6 @@ def stick_breaking_construction_sticky_hdp(alpha, kappa, gamma, num_modes, base_
 
     # for all modes sample a distribution with self excitement.
     for m in range(num_modes):
-
         # get specific base measure
         ab = alpha * beta
         ab[m] += kappa

@@ -1,0 +1,41 @@
+site_name: Sticky HDP-SLDS
+site_description: Gibbs sampling for a sticky hierarchical Dirichlet process switching linear dynamical system.
+site_url: https://kosmitive.github.io/sticky-hdp-slds-hmm/
+repo_url: https://github.com/kosmitive/sticky-hdp-slds-hmm
+repo_name: kosmitive/sticky-hdp-slds-hmm
+
+theme:
+  name: material
+  palette:
+    scheme: default
+    primary: indigo
+  features:
+    - navigation.sections
+    - content.code.copy
+
+nav:
+  - Overview: index.md
+  - Install and usage: install.md
+  - Results: results.md
+  - API: api.md
+  - Contributing: contributing.md
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: ["."]
+          options:
+            docstring_style: google
+            show_root_heading: true
+            show_source: false
+            members_order: source
+            show_if_no_docstring: false
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - toc:
+      permalink: true

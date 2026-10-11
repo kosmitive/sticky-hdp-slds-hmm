@@ -1,38 +1,14 @@
-# MIT License
-# 
-# Copyright (c) 2018 Markus Semmler
-# 
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-
-
-import numpy as np
-import matplotlib.pyplot as plt
 import os
 
-from matplotlib.ticker import MaxNLocator
+import matplotlib.pyplot as plt
+import numpy as np
 from matplotlib import rc
-rc('text', usetex=True)
+from matplotlib.ticker import MaxNLocator
 
-from mpl_toolkits.mplot3d import Axes3D
+rc("text", usetex=True)
 
 
-def plot_trajectories(root, name, trajectories, title, ylabel, style='normal'):
+def plot_trajectories(root, name, trajectories, title, ylabel, style="normal"):
     """This method can plot trajectories
 
     :param root: The root folder for image.
@@ -42,7 +18,7 @@ def plot_trajectories(root, name, trajectories, title, ylabel, style='normal'):
     :param ylabel: The label for y axis
     """
 
-    print("Plotting trajectories to {}".format(name), end='')
+    print(f"Plotting trajectories to {name}", end="")
 
     # there are two modes depending on the number of dimensions
     # of the trajectories
@@ -58,37 +34,37 @@ def plot_trajectories(root, name, trajectories, title, ylabel, style='normal'):
 
     # create filename and start plot
     for i in range(num_traj):
-        print('.', end='')
+        print(".", end="")
         # get file name
-        rn = "{}.pdf".format(name) if one_only else "{}_{}.pdf".format(name, i)
+        rn = f"{name}.pdf" if one_only else f"{name}_{i}.pdf"
         filename = os.path.join(root, rn)
         ax = __plot_setup(1)
         ax = ax[0]
 
         # transpose if necessary
-        if style is 'normal':
-            [plt.plot(trajectories[i,j]) for j in range(num_trace)]
+        if style == "normal":
+            [plt.plot(trajectories[i, j]) for j in range(num_trace)]
             plt.ylabel(ylabel)
             plt.xlabel("Step $t$")
-            plt.xlim([0, num_step-1])
+            plt.xlim([0, num_step - 1])
 
             # only integer values
             ax.xaxis.set_major_locator(MaxNLocator(integer=True))
             ax.yaxis.set_major_locator(MaxNLocator(integer=True))
 
-        elif style is 'draw':
+        elif style == "draw":
             if trajectories.shape[1] == 3:
-                ax = fig.add_subplot(111, projection='3d')
-                ax.plot(trajectories[i,0], trajectories[i,1], trajectories[i,2])
+                ax = fig.add_subplot(111, projection="3d")
+                ax.plot(trajectories[i, 0], trajectories[i, 1], trajectories[i, 2])
 
             elif trajectories.shape[1] == 2:
-                ax.plot(trajectories[i,0], trajectories[i,1])
+                ax.plot(trajectories[i, 0], trajectories[i, 1])
 
         # set labels and finalize
         plt.title(title.format(i))
         __plot_finish_off(filename)
 
-    print('.')
+    print(".")
 
 
 def plot_discrete_distribution(root, name, dist, title, labels, digits=3):
@@ -102,10 +78,10 @@ def plot_discrete_distribution(root, name, dist, title, labels, digits=3):
     :param labels: If 1 dimensional 1 element and if 2 dimensional a list of 2 labels
     """
 
-    print("Plotting discrete distribution to {}".format(name))
+    print(f"Plotting discrete distribution to {name}")
 
     # get number of elements
-    filename = os.path.join(root, "{}.pdf".format(name))
+    filename = os.path.join(root, f"{name}.pdf")
 
     # make a list out of the parameter
     if not isinstance(dist, list):
@@ -119,16 +95,15 @@ def plot_discrete_distribution(root, name, dist, title, labels, digits=3):
     num_plots = len(dist)
 
     # iterate over all plots
-    fig = plt.figure()
+    plt.figure()
     ax = __plot_setup(num_plots)
 
     # iterate over all plots single
     for i in range(num_plots):
-
         # expand if neccessary
         is_one_dimensional = np.ndim(dist[i]) == 1
         nel = np.expand_dims(dist[i], 1) if is_one_dimensional else dist[i]
-        c_vals = ax[i].imshow(nel, interpolation='nearest')
+        c_vals = ax[i].imshow(nel, interpolation="nearest")
 
         # if it is one-dimensional
         if is_one_dimensional:
@@ -171,8 +146,14 @@ def __plot_text_on_cells(ax, tdist, digits):
     for i in range(h):
         for j in range(w):
             c = "black" if tdist[i, j] > mid else "w"
-            ax.text(j, i, ("{:0." + str(digits) + "f}").format(tdist[i, j]),
-                    ha="center", va="center", color=c)
+            ax.text(
+                j,
+                i,
+                ("{:0." + str(digits) + "f}").format(tdist[i, j]),
+                ha="center",
+                va="center",
+                color=c,
+            )
 
 
 def __plot_finish_off(filename):
@@ -181,4 +162,3 @@ def __plot_finish_off(filename):
     plt.tight_layout()
     # save the current plot
     plt.savefig(filename)
-

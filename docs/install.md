@@ -22,6 +22,8 @@ The smoke script builds a two-mode system in two latent dimensions, simulates tw
 ```bash
 uv run python examples/pendulum_demo.py
 uv run python examples/pendulum_forecast.py
+uv run python examples/sp500_forecast.py
+uv run python examples/btc_forecast.py
 ```
 
 `pendulum_demo.py` accepts a sweep count as its only argument. The default is 300. The forecast script uses that same default and does not read the holdout while fitting.
@@ -38,6 +40,9 @@ uv run python examples/pendulum_forecast.py
 | `examples/smoke_slds.py` | Short end-to-end run |
 | `examples/pendulum_demo.py` | Noisy pendulum fit |
 | `examples/pendulum_forecast.py` | 80-step forecast from that fit |
+| `examples/sp500_forecast.py` | S&P 500 return and volatility forecast |
+| `examples/btc_forecast.py` | Bitcoin return and volatility forecast |
+| `examples/data/` | Close snapshots used by those two scripts |
 | `tests/` | Regression tests for the sampler |
 
 Checked-in packs still use the historical filenames: `P0.npy` is the emission scale and `R0.npy` is the latent covariance. Load also accepts the honest assignment when the two arrays have different sizes.

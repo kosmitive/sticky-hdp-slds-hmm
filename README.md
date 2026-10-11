@@ -12,6 +12,10 @@ Gibbs sampling for a sticky hierarchical Dirichlet process switching linear dyna
 
 The 2.35 rad release does not hold that rate. Its 90% band covers 78.8% of the horizon and 42.5% of the last 20-step block.
 
+## S&P 500 and bitcoin
+
+`examples/sp500_forecast.py` and `examples/btc_forecast.py` fit the same sampler to daily log returns and log 20-day realized volatility. Prices themselves are not the observations. The last 250 days are held out. On the S&P 500 holdout the return RMSE is 0.667 against 0.661 for predicting zero, and the volatility RMSE is 0.441 against 0.440 for a flat trailing value and 0.419 for EWMA 0.94. On bitcoin the return RMSE is 0.685 against 0.680 for zero, and the volatility RMSE is 0.950 against 0.862 trailing and 0.841 for EWMA. A GARCH(1,1) Student-t forecast, fit on the training returns only, is worse than those on both series. The return forecasts do not beat zero. Figures and the rest of the scores are on the [volatility page](https://kosmitive.github.io/sticky-hdp-slds-hmm/volatility/).
+
 Documentation: [https://kosmitive.github.io/sticky-hdp-slds-hmm/](https://kosmitive.github.io/sticky-hdp-slds-hmm/).
 
 The sampler alternates between:
@@ -56,6 +60,8 @@ The smoke script builds a two-mode system in two latent dimensions, simulates tw
 | `examples/smoke_slds.py` | Short end-to-end run |
 | `examples/pendulum_demo.py` | Noisy pendulum, with the figures below |
 | `examples/pendulum_forecast.py` | 80-step forecast from that fit |
+| `examples/sp500_forecast.py` | S&P 500 log-return and volatility forecast |
+| `examples/btc_forecast.py` | Bitcoin log-return and volatility forecast |
 | `tests/` | Regression tests for the sampler |
 | `docs/` | This site's source |
 

@@ -1,7 +1,7 @@
 # MIT License
-# 
+#
 # Copyright (c) 2018 Markus Semmler
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
@@ -21,13 +21,13 @@
 # SOFTWARE.
 
 
-import numpy as np
+import math as m
 
-from misc.disc_dist_divergences import regularize_matrix
+import numpy as np
 
 
 def sv_gamma_pdf(x, shape, rate):
-    norm = rate ** shape / m.gamma(shape)
+    norm = rate**shape / m.gamma(shape)
     un_norm = x ** (shape - 1) * np.exp(-rate * x)
     return norm * un_norm
 

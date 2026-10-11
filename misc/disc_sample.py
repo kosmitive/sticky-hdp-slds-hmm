@@ -1,7 +1,7 @@
 # MIT License
-# 
+#
 # Copyright (c) 2018 Markus Semmler
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
@@ -23,7 +23,7 @@
 
 import numpy as np
 
-from misc.disc_dist_divergences import symm_kl_divergence, kl_divergence
+from misc.disc_dist_divergences import symm_kl_divergence
 
 
 def sample_cat(measure, shape=None, use_logits=False):
@@ -43,7 +43,8 @@ def sample_cat(measure, shape=None, use_logits=False):
         measure = np.expand_dims(measure, 0)
 
     # for the shape part
-    if shape is None: shape = np.ones([0], np.int64)
+    if shape is None:
+        shape = np.ones([0], np.int64)
     elif np.ndim(shape) == 0:
         shape = np.expand_dims(shape, 0)
 
@@ -86,5 +87,5 @@ def test_sample_cat():
     print(symm_kl_divergence(nmeasure, estmeasure))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     test_sample_cat()

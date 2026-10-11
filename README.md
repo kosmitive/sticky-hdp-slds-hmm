@@ -10,52 +10,51 @@ The sampler alternates between:
 - matrix-normal inverse-Wishart or automatic relevance determination updates for the mode dynamics
 - an inverse-Wishart update for the shared emission covariance
 
-## Install
+`StickyHDPState` holds `alpha_plus_kappa`, `rho`, `gamma`, `beta`, and `pi`. `DynamicsState` holds `A`, `Sigma`, and the optional ARD precision `alpha`. `StickyHDPSLDSHMMModel.gibbs_step` runs one sweep in that order. Flags turn individual blocks off.
 
-From this repository:
+Documentation: [https://kosmitive.github.io/sticky-hdp-slds-hmm/](https://kosmitive.github.io/sticky-hdp-slds-hmm/).
 
-```bash
-pip install -e ".[dev]"
-```
+## Quick start
 
-Runtime dependencies are NumPy, SciPy, and Matplotlib. The `dev` extra adds pytest.
-
-## Run a small example
+[uv](https://docs.astral.sh/uv/) installs the locked environment. Python 3.9 or newer is enough.
 
 ```bash
-python examples/smoke_slds.py
+uv sync
+uv run pytest
+uv run python examples/smoke_slds.py
+uv run pre-commit install
 ```
 
-The script builds a two-mode system in two latent dimensions, simulates two sequences of length 12, and runs three Gibbs sweeps. A successful run prints a finite log joint, matching latent and observation shapes, transition rows that sum to one, a self-transition weight `rho` in `(0, 1)`, and a large diagonal entry for a mode that never switches.
-
-The same entry point is covered by the smoke test:
+`uv sync` installs the package and the `dev` group (pytest, ruff, pre-commit). Add the docs group when you want the site:
 
 ```bash
-pytest
+uv sync --group docs
+uv run mkdocs serve
 ```
+
+The smoke script builds a two-mode system in two latent dimensions, simulates two sequences of length 12, and runs three Gibbs sweeps. A successful run prints a finite log joint, matching latent and observation shapes, transition rows that sum to one, a self-transition weight `rho` in `(0, 1)`, and a large diagonal entry for a mode that never switches.
 
 ## Layout
 
 | Path | Role |
 | --- | --- |
-| `model/` | Priors and the `StickyHDPSLDSHMMModel` container |
+| `model/` | Priors, typed parameter state, and the model container |
 | `slds/` | One mixin per block of Gibbs updates |
 | `misc/` | Categorical sampling, stick breaking, I/O |
 | `data/` | Synthetic data generation |
-| `data_packs/` | Checked-in MNIW and ARD datasets |
+| `data_packs/` | MNIW and ARD datasets regenerated with seed `0` |
 | `examples/smoke_slds.py` | Short end-to-end run |
 | `examples/pendulum_demo.py` | Noisy pendulum, with the figures below |
 | `examples/pendulum_forecast.py` | 80-step forecast from that fit |
 | `tests/` | Regression tests for the sampler |
-| `docs/REFACTOR_ANALYSIS.md` | Structure, defects, and the remaining refactor |
-| `docs/img/` | Pendulum fit and forecast figures |
+| `docs/` | This site's source, including the refactor analysis |
 
-`hdp_params` is `[alpha + kappa, rho, gamma, beta, pi]`. `slds_params` is `[A, Sigma]` for the matrix-normal inverse-Wishart prior and `[A, Sigma, alpha]` for the ARD prior.
+## Results
 
-## Noisy pendulum
+### Noisy pendulum
 
 ```bash
-python examples/pendulum_demo.py
+uv run python examples/pendulum_demo.py
 ```
 
 The script integrates a nonlinear pendulum with the symplectic Euler method (`g/l = 9.81`) and fits the sticky HDP-SLDS. Four traces are released from rest at 0.45, 1.05, 1.70, and 2.35 rad. Each trace has 160 steps of `dt = 0.05` s. The observations are the angle and the angular velocity, with standard deviations 0.04 and 0.12, and the velocity also receives a process disturbance of standard deviation 0.01. The emission matrix is the identity, so piecewise-linear modes are asked to track the angle dependence of `sin(theta)`.
@@ -72,10 +71,10 @@ The last sample splits the swing into two sticky regimes. The mode whose mean ab
 
 ![Final mode sample against the noise-free angle](docs/img/pendulum_modes.png)
 
-## Forecast
+### Forecast
 
 ```bash
-python examples/pendulum_forecast.py
+uv run python examples/pendulum_forecast.py
 ```
 
 The forecast uses the same training series, seed, and hyperparameters as the fit above. Eighty further steps are integrated with continuation seed 12 and are never shown to the sampler. Sweeps 151–300 each contribute one future: the sweep’s sampled terminal state and mode, then modes from the sticky transition row, then latent states and observations. That is 150 predictive trajectories. The run took 107.6 s and reproduced the training chain (log joint 3076.00 at sweep 1 and 3495.25 at sweep 300).
@@ -88,11 +87,13 @@ The pool hides a split. The three smaller releases have holdout RMSE 0.539, 0.61
 
 ![RMSE and 90% coverage against lead time](docs/img/pendulum_forecast_horizon.png)
 
+The chain mixes inside a band; it does not freeze. Two modes are what this prior and this truncation keep. The forecast on the 2.35 rad release is the case where a linear mode fitted on the observed swing does not carry the trajectory for the full extra horizon.
+
 ## Tests
 
-`pytest` runs the checks in `tests/`. They cover stick-breaking initialization, the sticky table counts, emission degrees of freedom, the Kalman initialization, the two mode samplers, both dynamics posteriors, save/load of the ARD precision, and the smoke run.
+`uv run pytest` runs the checks in `tests/`. They cover stick-breaking initialization, the sticky table counts, emission degrees of freedom, the Kalman initialization, the two mode samplers, both dynamics posteriors, save/load of the ARD precision, the typed parameter state, `gibbs_step`, and the smoke run.
 
-`python -m test_runner.exec_tests` is the original experiment driver. It writes plots under `test_runs/` and prints sampler traces.
+`uv run python -m test_runner.exec_tests` is the original experiment driver. It writes plots under `test_runs/` and prints sampler traces.
 
 ## License
 

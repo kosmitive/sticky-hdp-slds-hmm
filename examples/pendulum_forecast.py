@@ -145,9 +145,9 @@ def fit_and_forecast(sweeps: int, horizon: int) -> dict[str, np.ndarray]:
                 {
                     "x_last": np.array(model.x[:, -1], copy=True),
                     "z_last": np.array(model.z[:, -1], copy=True),
-                    "A": np.array(model.slds_params[0], copy=True),
-                    "Sigma": np.array(model.slds_params[1], copy=True),
-                    "pi": np.array(model.hdp_params[4], copy=True),
+                    "A": np.array(model.dynamics.A, copy=True),
+                    "Sigma": np.array(model.dynamics.Sigma, copy=True),
+                    "pi": np.array(model.hdp.pi, copy=True),
                     "R": np.array(model.R, copy=True),
                     "C": np.array(model.C, copy=True),
                 }
@@ -217,7 +217,9 @@ def forecast_metrics(result: dict[str, np.ndarray]) -> dict[str, float]:
         "gaussian_jitter_draws": float(result["gaussian_jitter_draws"]),
     }
     for channel, name in enumerate(names):
-        metrics[f"rmse_model_{name}"] = _rmse(predictive_mean[:, :, channel], holdout[:, :, channel])
+        metrics[f"rmse_model_{name}"] = _rmse(
+            predictive_mean[:, :, channel], holdout[:, :, channel]
+        )
         metrics[f"rmse_model_{name}_10"] = _rmse(
             predictive_mean[:, :SHORT_HORIZON, channel],
             holdout[:, :SHORT_HORIZON, channel],
@@ -238,9 +240,13 @@ def forecast_metrics(result: dict[str, np.ndarray]) -> dict[str, float]:
             predictive_mean[trace, window],
             holdout[trace, window],
         )
-        metrics[f"coverage_largest_{start + 1}_{start + 20}"] = float(np.mean(inside[trace, window]))
+        metrics[f"coverage_largest_{start + 1}_{start + 20}"] = float(
+            np.mean(inside[trace, window])
+        )
     for trace_id in range(holdout.shape[0]):
-        metrics[f"rmse_model_trace_{trace_id}"] = _rmse(predictive_mean[trace_id], holdout[trace_id])
+        metrics[f"rmse_model_trace_{trace_id}"] = _rmse(
+            predictive_mean[trace_id], holdout[trace_id]
+        )
         metrics[f"coverage_trace_{trace_id}"] = float(np.mean(inside[trace_id]))
     return metrics
 
@@ -297,7 +303,13 @@ def save_forecast_plots(result: dict[str, np.ndarray], destination: Path) -> Non
             alpha=0.22,
             label="90% predictive band",
         )
-        axis.plot(hold_time, predictive_mean[trace, :, channel], color="#1f4e79", lw=1.5, label="predictive mean")
+        axis.plot(
+            hold_time,
+            predictive_mean[trace, :, channel],
+            color="#1f4e79",
+            lw=1.5,
+            label="predictive mean",
+        )
         axis.plot(
             hold_time,
             result["observations_hold"][trace, :, channel],
@@ -330,7 +342,7 @@ def save_forecast_plots(result: dict[str, np.ndarray], destination: Path) -> Non
     inside = (holdout >= lower) & (holdout <= upper)
     coverage_lead = np.mean(inside, axis=(0, 2))
     largest_error = predictive_mean[trace, :, :] - holdout[trace, :, :]
-    largest_lead = np.sqrt(np.mean(largest_error ** 2, axis=1))
+    largest_lead = np.sqrt(np.mean(largest_error**2, axis=1))
     largest_coverage = np.mean(inside[trace], axis=1)
     lead = np.arange(1, holdout.shape[1] + 1)
 

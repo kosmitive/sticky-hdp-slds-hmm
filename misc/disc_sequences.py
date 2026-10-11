@@ -1,7 +1,7 @@
 # MIT License
-# 
+#
 # Copyright (c) 2018 Markus Semmler
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
@@ -34,11 +34,9 @@ def count_state_transitions(sequences, max_state):
 
     # iterate over all dimensions
     for d in range(num_traces):
-
         # get current state estimate
         z_t = sequences[d, 0]
         for t in range(1, num_steps):
-
             # map states
             z_pt = int(z_t)
             z_t = int(sequences[d, t])

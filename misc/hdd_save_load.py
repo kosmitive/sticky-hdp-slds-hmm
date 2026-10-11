@@ -1,7 +1,7 @@
 # MIT License
-# 
+#
 # Copyright (c) 2018 Markus Semmler
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
@@ -21,16 +21,16 @@
 # SOFTWARE.
 
 
-from os.path import join
 import json
+from os.path import join
 
 
 def save_json(root, filename, sdict):
 
     # define json path
     json_path = join(root, filename)
-    print("Storing settings as json as {}".format(json_path))
-    with open(json_path, 'w') as f:
+    print(f"Storing settings as json as {json_path}")
+    with open(json_path, "w") as f:
         json.dump(sdict, f)
 
 

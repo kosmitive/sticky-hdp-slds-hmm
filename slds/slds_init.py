@@ -1,7 +1,7 @@
 # MIT License
-# 
+#
 # Copyright (c) 2018 Markus Semmler
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
@@ -22,16 +22,14 @@
 
 
 import numpy as np
-from misc.disc_sample import sample_cat
 
 
 class StickyHDPSLDSHMMModelInitMixin:
-
     def slds_init_z(self):
 
         num_traces, num_steps, _ = self.y.shape
-        beta = self.hdp_params[3]
-        pi = self.hdp_params[4]
+        beta = self.hdp.beta
+        pi = self.hdp.pi
 
         # now we sample the mode sequence
         max_state = len(beta)

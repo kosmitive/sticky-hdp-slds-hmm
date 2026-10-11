@@ -1,7 +1,7 @@
 # MIT License
-# 
+#
 # Copyright (c) 2018 Markus Semmler
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
@@ -47,7 +47,8 @@ def mv_gauss_logpdf(x, mu, sigma):
         emu = np.expand_dims(mu, 0)
     elif mu.ndim == 2 and mu.shape == x.shape:
         emu = mu
-    else: assert False
+    else:
+        raise AssertionError()
 
     # C is pos definite and calc cholesky
     scaled_cov = 2 * np.pi * sigma

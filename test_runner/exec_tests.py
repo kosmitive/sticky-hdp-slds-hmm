@@ -1,7 +1,7 @@
 # MIT License
-# 
+#
 # Copyright (c) 2018 Markus Semmler
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
@@ -21,15 +21,15 @@
 # SOFTWARE.
 
 
-from test_runner.all.slds_basic_test import slds_ard_all_test, slds_dyn_test, slds_hdp_test, slds_x_z_test
+from test_runner.all.slds_basic_test import slds_hdp_test
 
 
 def execute_all_testcases():
     slds_hdp_test()
-    #slds_dyn_test()
-    #slds_x_z_test()
-    #slds_ard_all_test()
+    # slds_dyn_test()
+    # slds_x_z_test()
+    # slds_ard_all_test()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     execute_all_testcases()

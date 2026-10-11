@@ -1,7 +1,7 @@
 # MIT License
-# 
+#
 # Copyright (c) 2018 Markus Semmler
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
@@ -22,15 +22,16 @@
 
 
 import numpy as np
-from scipy.stats import invwishart, matrix_normal
+from scipy.stats import invwishart
+
+from slds.regression import split_regression_pairs
 
 
 class StickyHDPSLDSHMMModelARDMixin:
-
     def slds_post_ard_dynamics_param_sampling(self):
 
         # split into reg problems
-        prob_pt, prob_ct, n = self.__split_into_regression_problems()
+        prob_pt, prob_ct, n = split_regression_pairs(self.z, self.x, self.hdp_prior.max_z)
 
         # perform one round of sampling
         self.__slds_post_ard_dynamics_sample_dyn_mat(prob_pt, prob_ct)
@@ -41,91 +42,77 @@ class StickyHDPSLDSHMMModelARDMixin:
 
         # sample the dynamic matrices
         for k in range(self.hdp_prior.max_z):
-
-            # compute sufficient statistics
-            suff_stats = 0
-
-            # obtain number of elements
-            num_elements = prob_ct[k].shape[1]
-            current_dyn = self.slds_params[0][k]
-
-            # iterate over all elements
-            for i in range(num_elements):
-                v = prob_ct[k][:, i] - current_dyn @ prob_pt[k][:, i]
-                suff_stats += np.outer(v, v)
-
-            # sample covariance
-            self.slds_params[1][k] = invwishart.rvs(n[k] + self.dyn_prior.n0,
-                       suff_stats + self.dyn_prior.S0)
+            current_dyn = self.dynamics.A[k]
+            if prob_ct[k].shape[1] == 0:
+                suff_stats = np.zeros((self.ld, self.ld))
+            else:
+                residual = prob_ct[k] - current_dyn @ prob_pt[k]
+                suff_stats = residual @ residual.T
+            self.dynamics.Sigma[k] = invwishart.rvs(
+                n[k] + self.dyn_prior.n0,
+                suff_stats + self.dyn_prior.S0,
+            )
 
     def __slds_post_ard_dynamics_sample_dyn_mat(self, prob_pt, prob_ct):
 
         # obtain alphas
-        alphas = self.slds_params[2]
+        alphas = self.dynamics.alpha
 
         # sample the dynamic matrices
         for k in range(self.hdp_prior.max_z):
-
-            # obtain number of elements
-            num_elements = prob_ct[k].shape[1]
-
             # Eq. (30): information form uses Sigma^{-1}, and the ARD prior
             # precision on column j is alpha_j (n replicates under column-major vec).
-            noise_precision = np.linalg.inv(self.slds_params[1][k])
-            info = np.zeros(self.ld ** 2)
-            precision = np.diag(np.repeat(alphas[k], self.ld))
-
-            for i in range(num_elements):
-                mat = np.tile(np.eye(self.ld), [1, self.ld])
-                mat *= np.expand_dims(np.repeat(prob_pt[k][:, i], self.ld), 0)
-                info += mat.transpose() @ noise_precision @ prob_ct[k][:, i]
-                precision += mat.transpose() @ noise_precision @ mat
+            noise_precision = np.linalg.inv(self.dynamics.Sigma[k])
+            info, precision = _ard_normal_equations(
+                prob_pt[k], prob_ct[k], noise_precision, alphas[k]
+            )
 
             cov = np.linalg.inv(precision)
             cov = 0.5 * (cov + cov.T)
             mean = cov @ info
             new_A = np.random.multivariate_normal(mean, cov)
             # Column-major vectorization matches the design matrix above.
-            self.slds_params[0][k] = new_A.reshape((self.ld, self.ld), order='F')
+            self.dynamics.A[k] = new_A.reshape((self.ld, self.ld), order="F")
 
     def __slds_post_ard_dynamics_sample_alpha(self):
 
         # sample the dynamic matrices
         for k in range(self.hdp_prior.max_z):
-
             # rename
-            current_dyn = self.slds_params[0][k]
+            current_dyn = self.dynamics.A[k]
             # Eq. (31): rate += (1/2) * sum of squares in the column.
             alpha_a = self.dyn_prior.alpha0[0] + self.ld / 2
-            alpha_b = self.dyn_prior.alpha0[1] + 0.5 * np.sum(current_dyn ** 2, axis=0)
-            self.slds_params[2][k, :] = np.random.gamma(alpha_a, 1.0 / alpha_b)
+            alpha_b = self.dyn_prior.alpha0[1] + 0.5 * np.sum(current_dyn**2, axis=0)
+            self.dynamics.alpha[k, :] = np.random.gamma(alpha_a, 1.0 / alpha_b)
 
-    def __split_into_regression_problems(self):
 
-        mode_seq = self.z
-        pseudo_observations = self.x
-        max_state = self.hdp_prior.max_z
+def _ard_normal_equations(parents, children, noise_precision, column_precision):
+    """Column-major normal equations for one mode.
 
-        num_traces, num_steps, latent_dim = pseudo_observations.shape
-        dim = latent_dim
+    The design row used by the original loop is ``kron(parent, I)``. Block
+    ``(j, k)`` of the Gram matrix is ``(parent_j parent_k) * Sigma^{-1}``.
 
-        # Pairs exist only for t >= 1. The first state has no stored parent.
-        bins = np.bincount(mode_seq[:, 1:].reshape(-1), minlength=max_state)
-        indices = np.zeros(max_state, dtype=np.int64)
+    Args:
+        parents: Parent states, shape ``(latent, count)``.
+        children: Child states, shape ``(latent, count)``.
+        noise_precision: ``Sigma^{-1}``.
+        column_precision: ARD precision for each column of ``A``.
 
-        # reserve space for each bin
-        prob_h = [np.empty([dim, b]) for b in bins]
-        prob_oh = [np.empty([dim, b]) for b in bins]
+    Returns:
+        The information vector and the precision matrix of ``vec(A)``.
+    """
 
-        # iterate over all
-        for d in range(num_traces):
-            for t in range(1, num_steps):
-
-                k = mode_seq[d, t]
-                i = indices[k]
-                prob_oh[k][:, i] = pseudo_observations[d, t]
-                prob_h[k][:, i] = pseudo_observations[d, t-1]
-                indices[k] += 1
-
-        return prob_h, prob_oh, bins
-
+    latent_dim = parents.shape[0]
+    info = np.zeros(latent_dim**2)
+    precision = np.diag(np.repeat(column_precision, latent_dim))
+    if parents.shape[1] == 0:
+        return info, precision
+    weighted = noise_precision @ children
+    gram = parents @ parents.T
+    for column in range(latent_dim):
+        info[column * latent_dim : (column + 1) * latent_dim] = weighted @ parents[column]
+        for row in range(latent_dim):
+            block = slice(column * latent_dim, (column + 1) * latent_dim)
+            other = slice(row * latent_dim, (row + 1) * latent_dim)
+            precision[block, other] += gram[column, row] * noise_precision
+    return info, precision

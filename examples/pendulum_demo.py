@@ -155,7 +155,7 @@ def build_model(observations: np.ndarray) -> StickyHDPSLDSHMMModel:
         "uniform",
     )
     # Inverse-Wishart mean of R is about diag(0.04**2, 0.12**2).
-    emission_scale = np.diag(OBSERVATION_STD ** 2) * 3.0
+    emission_scale = np.diag(OBSERVATION_STD**2) * 3.0
     model = StickyHDPSLDSHMMModel(
         latent_dim,
         latent_dim,
@@ -173,23 +173,9 @@ def build_model(observations: np.ndarray) -> StickyHDPSLDSHMMModel:
 
 
 def gibbs_sweep(model: StickyHDPSLDSHMMModel) -> None:
-    """One full sweep, in the same order as ``examples/smoke_slds.py``."""
+    """One full sweep. The model owns the update order."""
 
-    model.slds_post_block_sample_z()
-    backward = model.slds_backward_kalman_filter_gains()
-    forward = model.slds_forward_kalman_filter_gains()
-    model.slds_post_seq_sample_z(forward[0], forward[1], backward[0], backward[1])
-    backward = model.slds_backward_kalman_filter_gains()
-    model.slds_post_block_sample_x(backward[0], backward[1])
-    model.calc_transitions()
-    model.sample_post_auxiliary_vars()
-    model.sample_post_hdp_alpha_kappa()
-    model.sample_post_hdp_rho()
-    model.sample_post_hdp_gamma()
-    model.sample_post_hdp_beta()
-    model.sample_post_hdp_pi()
-    model.slds_post_mniw_dynamics_param_sampling()
-    model.slds_post_sample_r()
+    model.gibbs_step()
 
 
 def fit(model: StickyHDPSLDSHMMModel, sweeps: int) -> dict[str, np.ndarray]:
@@ -213,7 +199,7 @@ def fit(model: StickyHDPSLDSHMMModel, sweeps: int) -> dict[str, np.ndarray]:
         gibbs_sweep(model)
         log_joint[sweep] = model.calc_log_likelihood()
         used_modes[sweep] = np.unique(model.z).size
-        rho[sweep] = model.hdp_params[1]
+        rho[sweep] = model.hdp.rho
         latents[sweep] = model.x
         modes[sweep] = model.z
         if sweep == 0 or (sweep + 1) % 25 == 0 or sweep + 1 == sweeps:
@@ -421,7 +407,7 @@ def _print_regime_diagnostic(
             f"mean_abs_angle {float(np.mean(angle[mask])):.3f}  "
             f"mean_dwell {float(np.mean(dwells)):.2f}"
         )
-        print("   ", np.array2string(model.slds_params[0][mode], precision=3))
+        print("   ", np.array2string(model.dynamics.A[mode], precision=3))
 
 
 def main() -> None:

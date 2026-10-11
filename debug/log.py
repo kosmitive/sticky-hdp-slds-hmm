@@ -1,7 +1,7 @@
 # MIT License
-# 
+#
 # Copyright (c) 2018 Markus Semmler
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
@@ -21,15 +21,14 @@
 # SOFTWARE.
 
 
-import numpy as np
 import os
-import time
-from misc.output import print_mat_statistics
+
+import numpy as np
 
 
 class TestLogger:
-
     """Simple class which represents a log token."""
+
     def __init__(self, f_path):
         self.f_path = f_path
         self.num_cats = 0
@@ -83,7 +82,6 @@ class TestLogger:
 
         # if the path doesn't exist
         if not os.path.exists(mat_name):
-
             # create it and fill initially with some garbage
             os.mkdir(mat_name)
 
@@ -93,7 +91,6 @@ class TestLogger:
             old_eig_basis = np.empty([0, d, d], dtype=np.complex64)
 
         else:
-
             # load the text in the folder
             old_eig = np.load(eig_file)
             old_mat = np.load(mat_file)
@@ -120,9 +117,5 @@ def create_logtoken(root):
     :param root: The root, like a collection directory.
     :return: The file path itself should be returned.
     """
-
-    # load the traces of observations
-    folder = time.strftime("%Y%m%d-%H%M%S")
-    f_path = os.path.join(root, folder)
 
     return TestLogger(root)

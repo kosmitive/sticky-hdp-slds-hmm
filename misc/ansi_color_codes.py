@@ -1,7 +1,7 @@
 # MIT License
-# 
+#
 # Copyright (c) 2018 Markus Semmler
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
@@ -22,17 +22,16 @@
 
 
 class ACC:
-
     # Color Codes
-    Black = '\033[30m'
-    Red = '\033[31m'
-    Green = '\033[32m'
-    Yellow = '\033[33m'
-    Header = '\033[95m'
-    OkBlue = '\033[94m'
-    OkGreen = '\033[92m'
-    Warning = '\033[93m'
-    Fail = '\033[91m'
-    End = '\033[0m'
-    Bold = '\033[1m'
-    Underline = '\033[4m'
+    Black = "\033[30m"
+    Red = "\033[31m"
+    Green = "\033[32m"
+    Yellow = "\033[33m"
+    Header = "\033[95m"
+    OkBlue = "\033[94m"
+    OkGreen = "\033[92m"
+    Warning = "\033[93m"
+    Fail = "\033[91m"
+    End = "\033[0m"
+    Bold = "\033[1m"
+    Underline = "\033[4m"

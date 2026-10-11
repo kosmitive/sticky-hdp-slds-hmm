@@ -1,7 +1,7 @@
 # MIT License
-# 
+#
 # Copyright (c) 2018 Markus Semmler
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
@@ -33,7 +33,8 @@ def gen_plot(timeline, filename, title):
 
     plt.figure(10000)
     plt.clf()
-    for i in range(len(timeline)): plt.plot(timeline[i])
+    for i in range(len(timeline)):
+        plt.plot(timeline[i])
     plt.title(title)
     plt.savefig(filename)
 
@@ -42,34 +43,59 @@ def print_dbl_line(num=150):
     print("=" * num)
 
 
-def print_trace(trace_num, mode_seq, po, observations, sc_mode_seq, sc_po, sc_observations, max_steps=20):
+def print_trace(
+    trace_num, mode_seq, po, observations, sc_mode_seq, sc_po, sc_observations, max_steps=20
+):
 
     _, num_steps, _ = observations.shape
     print_line()
     for s in range(np.minimum(max_steps, num_steps)):
-        print("\t| ", mode_seq[trace_num, s], " ", ACC.OkBlue, "[", sc_mode_seq[trace_num, s], "] \t", ACC.End, end='')
-        print("-> [", *print_array(po[trace_num, s]), "] ", ACC.OkBlue, "[", *print_array(sc_po[trace_num, s]), "]", ACC.End, end='')
+        print(
+            "\t| ",
+            mode_seq[trace_num, s],
+            " ",
+            ACC.OkBlue,
+            "[",
+            sc_mode_seq[trace_num, s],
+            "] \t",
+            ACC.End,
+            end="",
+        )
+        print(
+            "-> [",
+            *print_array(po[trace_num, s]),
+            "] ",
+            ACC.OkBlue,
+            "[",
+            *print_array(sc_po[trace_num, s]),
+            "]",
+            ACC.End,
+            end="",
+        )
         print("-> [", *print_array(observations[trace_num, s]), "] ")
 
-    [print("\t" * 2 + "  ." + "\t" * 9 + "." + "\t" * 10 + "  ." + "\t" * 9 + "  .") for _ in range(3)]
+    [
+        print("\t" * 2 + "  ." + "\t" * 9 + "." + "\t" * 10 + "  ." + "\t" * 9 + "  .")
+        for _ in range(3)
+    ]
 
 
-def print_array(a, format_string ='{0:+.8f}'):
-    return [format_string.format(v,i) for i,v in enumerate(a)]
+def print_array(a, format_string="{0:+.8f}"):
+    return [format_string.format(v, i) for i, v in enumerate(a)]
 
 
 def print_line(text=None, num=150):
     print("-" * num)
     if text is not None:
-        print("--- ", end='')
-        print(text, end='')
+        print("--- ", end="")
+        print(text, end="")
         print(" ", "-" * (num - 6 - len(text)))
 
 
 def print_mat_statistics(id, a):
 
     # extract, eigenvalues and eigenvectors
-    np.set_printoptions(formatter={'float': '{: 0.5f}'.format})
+    np.set_printoptions(formatter={"float": "{: 0.5f}".format})
     evals, evecs = np.linalg.eig(a)
 
     # sort the values
@@ -82,14 +108,14 @@ def print_mat_statistics(id, a):
 
     # do the printing
     print_line()
-    print("Matrix [{}]".format(id))
+    print(f"Matrix [{id}]")
     print_line("Properties")
-    print("\t| COND_NUM = {:0.6f}".format(cond_num))
-    print("\t| EIG = \t", end='')
+    print(f"\t| COND_NUM = {cond_num:0.6f}")
+    print("\t| EIG = \t", end="")
     for i in range(len(evals)):
         print(evals[i])
         if i < len(evals) - 1:
-            print("\t\t\t\t", end='')
+            print("\t\t\t\t", end="")
 
     # print matrix
     print_line("Matrix")
@@ -97,4 +123,4 @@ def print_mat_statistics(id, a):
 
     # print eigen vector basis
     print_line("U")
-    [print("u{} -> {} -> {}".format(i, evals[i], evecs[:,i])) for i in range(len(a))]
+    [print(f"u{i} -> {evals[i]} -> {evecs[:, i]}") for i in range(len(a))]

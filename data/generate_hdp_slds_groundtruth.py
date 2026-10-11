@@ -1,7 +1,7 @@
 # MIT License
-# 
+#
 # Copyright (c) 2018 Markus Semmler
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
@@ -20,18 +20,12 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import numpy as np
 import os
 import shutil
 
-from os.path import join
-
-from model.ard_prior import ARDPrior
-from model.sticky_hdp_slds_hmm import StickyHDPSLDSHMMModel
-from model.mniw_prior import MNIWPrior
+import matplotlib
 from misc.output import print_line
 from misc.plotting import plot_discrete_distribution, plot_trajectories
-from model.sticky_hdp_prior import StickyHDPPrior
 
 
 def generate_hdp_slds_groundtrouth(folder, num_traces, num_steps, model):
@@ -43,7 +37,9 @@ def generate_hdp_slds_groundtrouth(folder, num_traces, num_steps, model):
     """
 
     print_line()
-    print("Empty/Create folder {}".format(folder))
+    print(f"Empty/Create folder {folder}")
+    if shutil.which("latex") is None:
+        matplotlib.rcParams["text.usetex"] = False
 
     # remove folder if exists
     if os.path.exists(folder):
@@ -59,29 +55,68 @@ def generate_hdp_slds_groundtrouth(folder, num_traces, num_steps, model):
     model.store(folder)
 
     # now generate an image folder
-    img_path = os.path.join(folder, 'img')
+    img_path = os.path.join(folder, "img")
     os.mkdir(img_path)
 
     # generate path for beta plot
     print("Creating discrete plots...")
-    plot_discrete_distribution(img_path, "beta", model.hdp_params[3], r'$\beta[z]$ --- Parent Dist.', 'z')
-    plot_discrete_distribution(img_path, "pi", model.hdp_params[4], r'$\pi[z_t, z_{t+1}]$ --- Transition Probs.',
-                               ['$z_t$', '$z_{t+1}$'])
+    plot_discrete_distribution(
+        img_path, "beta", model.hdp.beta, r"$\beta[z]$ --- Parent Dist.", "z"
+    )
+    plot_discrete_distribution(
+        img_path,
+        "pi",
+        model.hdp.pi,
+        r"$\pi[z_t, z_{t+1}]$ --- Transition Probs.",
+        ["$z_t$", "$z_{t+1}$"],
+    )
 
     # plot the modes and the covariances as well
     ld = model.ld
-    mid = [model.slds_params[0].reshape([-1,  model.slds_params[0].shape[-1]]), model.slds_params[1].reshape([model.hdp_prior.max_z * ld,  ld])]
-    plot_discrete_distribution(img_path, "dynamics", mid, [r'$A$ --- Mode Projection.', r'$\Sigma$ --- Mode Covariance.'], ['$x_{t+1}$', '$x_t$'], digits=2)
+    mid = [
+        model.dynamics.A.reshape([-1, model.dynamics.A.shape[-1]]),
+        model.dynamics.Sigma.reshape([model.hdp_prior.max_z * ld, ld]),
+    ]
+    plot_discrete_distribution(
+        img_path,
+        "dynamics",
+        mid,
+        [r"$A$ --- Mode Projection.", r"$\Sigma$ --- Mode Covariance."],
+        ["$x_{t+1}$", "$x_t$"],
+        digits=2,
+    )
 
     # plot the trajectories
     print("Creating trajectories plots...")
     num_trajs = 5
     plot_trajectories(img_path, "modes", model.z[:num_trajs], "$z_t$ --- Mode Sequence", "Mode")
-    plot_trajectories(img_path, "latent", model.x[:num_trajs], "$x_t$ --- Latent Sequence {}", "Vals")
-    plot_trajectories(img_path, "latent_3d", model.x[:num_trajs], "$x_t$ --- Latent Sequence {}", "Vals", style='draw')
-    plot_trajectories(img_path, "emission", model.y[:num_trajs], "$y_t$ --- Observable Sequence {}", "Vals")
-    plot_trajectories(img_path, "emission_3d", model.y[:num_trajs], "$y_t$ --- Observable Sequence {}", "Vals", style='draw')
-    plot_trajectories(img_path, "latent_noise", model.e[:num_trajs], "$e_t$ --- Latent Noise {}", "Vals")
-    plot_trajectories(img_path, "emission_noise", model.w[:num_trajs], "$w_t$ --- Emission Noise {}", "Vals")
+    plot_trajectories(
+        img_path, "latent", model.x[:num_trajs], "$x_t$ --- Latent Sequence {}", "Vals"
+    )
+    plot_trajectories(
+        img_path,
+        "latent_3d",
+        model.x[:num_trajs],
+        "$x_t$ --- Latent Sequence {}",
+        "Vals",
+        style="draw",
+    )
+    plot_trajectories(
+        img_path, "emission", model.y[:num_trajs], "$y_t$ --- Observable Sequence {}", "Vals"
+    )
+    plot_trajectories(
+        img_path,
+        "emission_3d",
+        model.y[:num_trajs],
+        "$y_t$ --- Observable Sequence {}",
+        "Vals",
+        style="draw",
+    )
+    plot_trajectories(
+        img_path, "latent_noise", model.e[:num_trajs], "$e_t$ --- Latent Noise {}", "Vals"
+    )
+    plot_trajectories(
+        img_path, "emission_noise", model.w[:num_trajs], "$w_t$ --- Emission Noise {}", "Vals"
+    )
 
     print_line()

@@ -1,7 +1,7 @@
 # MIT License
-# 
+#
 # Copyright (c) 2018 Markus Semmler
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
@@ -25,7 +25,6 @@ import numpy as np
 
 
 class StickyHDPSLDSHMMModelBlockXMixin:
-
     def slds_post_block_sample_x(self, backward_gain_mat, backward_gain_vec):
 
         num_traces, num_steps, state_dim = backward_gain_vec.shape
@@ -43,17 +42,21 @@ class StickyHDPSLDSHMMModelBlockXMixin:
             pseudo_observations[d, 0] = np.random.multivariate_normal(mean, covariance)
 
         for d in range(num_traces):
-
             # by forward iter
             for t in range(num_steps):
                 z_t = self.z[d, t]
-                dyn_mat = self.slds_params[0][z_t]
-                dyn_var_mat = self.slds_params[1][z_t]
+                dyn_mat = self.dynamics.A[z_t]
+                dyn_var_mat = self.dynamics.Sigma[z_t]
                 inv_dyn_var_mat = np.linalg.inv(dyn_var_mat)
 
                 inv_sigma_lam = np.linalg.inv(inv_dyn_var_mat + backward_gain_mat[d, t + 1])
                 inv_sigma_lam = 0.5 * (inv_sigma_lam + inv_sigma_lam.T)
-                middle = inv_dyn_var_mat @ dyn_mat @ pseudo_observations[d, t] + backward_gain_vec[d, t + 1]
-                pseudo_observations[d, t + 1] = np.random.multivariate_normal(inv_sigma_lam @ middle, inv_sigma_lam)
+                middle = (
+                    inv_dyn_var_mat @ dyn_mat @ pseudo_observations[d, t]
+                    + backward_gain_vec[d, t + 1]
+                )
+                pseudo_observations[d, t + 1] = np.random.multivariate_normal(
+                    inv_sigma_lam @ middle, inv_sigma_lam
+                )
 
         self.x = pseudo_observations[:, 1:]

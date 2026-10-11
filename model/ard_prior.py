@@ -1,7 +1,7 @@
 # MIT License
-# 
+#
 # Copyright (c) 2018 Markus Semmler
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
@@ -23,16 +23,15 @@
 
 from os.path import join
 
-from misc.hdd_save_load import save_json, load_json
 import numpy as np
+from misc.hdd_save_load import load_json, save_json
 from scipy.stats import gamma, invwishart, multivariate_normal
 
 
 class ARDPrior:
-
     # define function names
-    fn = 'ard_prior.json'
-    fn_S0 = 'S0.npy'
+    fn = "ard_prior.json"
+    fn_S0 = "S0.npy"
 
     def __init__(self, alpha0, n0, S0):
 
@@ -53,7 +52,7 @@ class ARDPrior:
 
         # use the generated alpha to generate the modes
         cov = np.diag(1 / alpha.repeat(nd))
-        A = multivariate_normal.rvs(np.zeros(num * nd ** 2), cov)
+        A = multivariate_normal.rvs(np.zeros(num * nd**2), cov)
 
         # bring in correct form
         A = A.reshape([num, nd, nd]).transpose([0, 2, 1])
@@ -66,9 +65,9 @@ class ARDPrior:
         """Load the prior from the specified folder."""
 
         d = load_json(folder, ARDPrior.fn)
-        alpha_shape = d['alpha_shape']
-        alpha_rate = d['alpha_rate']
-        n0 = d['n0']
+        alpha_shape = d["alpha_shape"]
+        alpha_rate = d["alpha_rate"]
+        n0 = d["n0"]
         S0 = np.load(join(folder, ARDPrior.fn_S0))
 
         return ARDPrior([alpha_shape, alpha_rate], n0, S0)
@@ -78,9 +77,9 @@ class ARDPrior:
 
         # store the dict
         sdict = {
-            'n0': self.n0,
-            'alpha_rate': self.alpha0[1],
-            'alpha_shape': self.alpha0[0],
+            "n0": self.n0,
+            "alpha_rate": self.alpha0[1],
+            "alpha_shape": self.alpha0[0],
         }
 
         save_json(folder, ARDPrior.fn, sdict)

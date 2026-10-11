@@ -90,25 +90,27 @@ These were confirmed by reading the updates against the paper and by running a t
 
 The algorithm’s shape is unchanged: the same mixins, the same truncation, the same information filters, the same split between block and sequential mode sampling.
 
-## What is left, in order
+## Status of the follow-up
 
-1. **Replace the parameter lists with a small typed state.** One object for the sticky HDP (`alpha_plus_kappa`, `rho`, `gamma`, `beta`, `pi`) and one for the dynamics (`A`, `Sigma`, optional `alpha`). Keep the filenames `P0.npy` and `R0.npy` readable by accepting both the historical swap and honest names on load. This is the change that makes every later edit reviewable.
+Items 1, 2, 4, 6, 7, and 8 from the list below are done. Items 3 and 5 are deliberately left. They change the sampled distribution, and this pass does not.
 
-2. **Give the Gibbs sweep one function.** `gibbs_step` should live on the model, take the sampling flags, and own the order: modes, filters, states, sticky HDP, dynamics, emission. The experiment harness should call it. Today that order is copied in `gt_sticky_hdp_slds_hmm.py` and in the smoke script.
+1. **Done.** `StickyHDPState` and `DynamicsState` in `model/state.py` replace the positional lists. Load still reads the historical `P0.npy` / `R0.npy` swap, and it reads honest names when the array sizes distinguish them. Store keeps writing the historical names.
 
-3. **Resolve the first-state convention in one place.** Either store the auxiliary parent and let every update see the pair `(x_parent, x_0, z_0)`, or define `z_0` as a mode that does not emit a dynamics pair and stop using it inside the state sampler. The regression, the filters, `simulate`, and `slds_init_z` should share that choice. This is a behavior change and wants its own tests against a hand-computed two-step chain.
+2. **Done.** `StickyHDPSLDSHMMModel.gibbs_step` owns the order: block modes, information filters, sequential modes, latents, sticky HDP, dynamics, emission. Flags omit a block. The experiment harness, the smoke script, and both pendulum scripts call it.
 
-4. **Move the hot updates out of pure Python loops.** The backward mode messages, the emission and latent log joints, and the ARD normal equations are dense linear algebra of size `latent_dim`, which is already small. Vectorize over time. Compute the block mode sampler in log space. Cache `C^T R^{-1} C`.
+3. **Left on purpose.** The first stored state still has no parent. Resolving that convention would change numerical results and needs its own tests against a hand-computed two-step chain.
 
-5. **Make the forward filter survivable when `A` is singular.** Algorithm 6 inverts `A`. The direct predict-update used as the oracle in `test_forward_filter_starts_at_the_prior_precision` does not. Prefer that form, or a pseudo-inverse with a tested residual, once the state convention in item 3 is fixed.
+4. **Done.** Backward mode messages and the block-mode categorical are in log space. Emission and latent log joints, and the ARD normal equations, are dense linear algebra. `C^T R^{-1} C` is cached until `C` or `R` is replaced. The forward filter still inverts `A`.
 
-6. **Delete the duplicated regression splitter and the experiment-flag boilerplate.** One function should build the per-mode pairs. The cases in `test_runner/all/slds_basic_test.py` should be a table of flags, not six copies of the same dictionary.
+5. **Left on purpose.** The forward filter is still Algorithm 6, including the inverse of `A`. A singular map still fails there.
 
-7. **Regenerate `data_packs/` with the corrected simulator** so `w` matches `y`, and record the seed. Until then, treat those packs as legacy artifacts: they load, and their `w` arrays do not line up with `y`.
+6. **Done.** `slds/regression.py` is the only regression splitter. `test_runner/all/slds_basic_test.py` builds cases from a flag table.
 
-8. **Continuous integration.** Run `pytest` on a current NumPy and SciPy. The suite is under a second on the smoke size and does not need the plotting driver.
+7. **Done.** `data_packs/hdp_slds_mniw` and `data_packs/hdp_slds_ard` were regenerated with seed `0`, recorded in each pack as `SEED`. `w` has the same shape as `y`.
 
-Items 1 and 2 are the refactor. Items 3 and 5 change numerical results and should not be folded into a rename. Items 4, 6, 7, and 8 are safe once the state object exists.
+8. **Done.** GitHub Actions runs ruff and pytest on Python 3.9 and 3.13, runs the pre-commit hooks, and builds this site. Pushes to `master` deploy it with GitHub Pages.
+
+The project is installed with uv (`uv sync`, `uv run`). Ruff lints and formats. MkDocs publishes the notes on this site.
 
 ## Pendulum check
 

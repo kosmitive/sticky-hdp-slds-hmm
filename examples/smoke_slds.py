@@ -55,37 +55,23 @@ def run_smoke(steps: int = 3, seed: int = 0) -> dict[str, object]:
         projection,
     )
     model.init_params()
-    model.slds_params[0][:] = 0.6 * np.eye(latent_dim)
-    model.slds_params[1][:] = 0.05 * np.eye(latent_dim)
+    model.dynamics.A[:] = 0.6 * np.eye(latent_dim)
+    model.dynamics.Sigma[:] = 0.05 * np.eye(latent_dim)
     model.R = 0.05 * np.eye(latent_dim)
-    model.hdp_params[3] = np.full(mode_count, 1.0 / mode_count)
-    model.hdp_params[4] = np.array([[0.9, 0.1], [0.15, 0.85]])
+    model.hdp.beta = np.full(mode_count, 1.0 / mode_count)
+    model.hdp.pi = np.array([[0.9, 0.1], [0.15, 0.85]])
     model.simulate(trace_count, step_count, init=False)
 
     for _ in range(steps):
-        model.slds_post_block_sample_z()
-        backward = model.slds_backward_kalman_filter_gains()
-        forward = model.slds_forward_kalman_filter_gains()
-        model.slds_post_seq_sample_z(forward[0], forward[1], backward[0], backward[1])
-        backward = model.slds_backward_kalman_filter_gains()
-        model.slds_post_block_sample_x(backward[0], backward[1])
-        model.calc_transitions()
-        model.sample_post_auxiliary_vars()
-        model.sample_post_hdp_alpha_kappa()
-        model.sample_post_hdp_rho()
-        model.sample_post_hdp_gamma()
-        model.sample_post_hdp_beta()
-        model.sample_post_hdp_pi()
-        model.slds_post_mniw_dynamics_param_sampling()
-        model.slds_post_sample_r()
+        model.gibbs_step()
     log_likelihood = float(model.calc_log_likelihood())
-    rho = float(model.hdp_params[1])
+    rho = float(model.hdp.rho)
 
     # A separate sticky check: a run of one mode must put mass on its diagonal.
     model.z = np.zeros((trace_count, step_count), dtype=np.int64)
-    model.hdp_params[0] = 2.0
-    model.hdp_params[1] = 0.5
-    model.hdp_params[3] = np.full(mode_count, 0.5)
+    model.hdp.alpha_plus_kappa = 2.0
+    model.hdp.rho = 0.5
+    model.hdp.beta = np.full(mode_count, 0.5)
     model.calc_transitions()
     model.sample_post_hdp_pi()
 
@@ -94,9 +80,9 @@ def run_smoke(steps: int = 3, seed: int = 0) -> dict[str, object]:
         "x_shape": tuple(model.x.shape),
         "y_shape": tuple(model.y.shape),
         "w_shape": tuple(model.w.shape),
-        "pi_row_sums": model.hdp_params[4].sum(axis=1).copy(),
+        "pi_row_sums": model.hdp.pi.sum(axis=1).copy(),
         "rho": rho,
-        "sticky_diagonal": float(model.hdp_params[4][0, 0]),
+        "sticky_diagonal": float(model.hdp.pi[0, 0]),
     }
 
 

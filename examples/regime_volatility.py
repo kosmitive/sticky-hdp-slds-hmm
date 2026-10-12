@@ -10,9 +10,13 @@ The regime model is a finite Markov-switching regression on daily
 on lags 1, 5, and 22 and keep their own intercepts and innovation scales.
 The Dirichlet prior on each transition row has mean self-stay 0.98. Slopes
 are rejected unless the companion spectral radius stays below 0.999.
-Forecasts are the average, over retained Gibbs draws and simulated paths,
-of ``log(mean r^2)``. That average uses the filtered regime distribution
-at the origin. Parameters are refit on a trailing four-year window.
+The scored forecast is a direct regression for each horizon: the target
+is ``log(mean r^2)`` over the next ``h`` days, and each regime has its
+own intercept and HAR slopes. Those regressions are weighted by the
+filtered regime distribution at the origin after it has been moved
+forward with the transition matrix. An additive bias correction uses
+only windows that have already ended. Parameters are refit on a trailing
+four-year window.
 
     python examples/regime_volatility.py sp500
     python examples/regime_volatility.py btc
@@ -49,10 +53,11 @@ LAG = 22
 WEEK = 5
 REFIT_YEARS = 4
 REFIT_EVERY = 21
-SWEEPS = 500
-CHAINS = 3
+SWEEPS = 2000
+CHAINS = 4
 PATHS = 25
-FORECAST_DRAWS = 80
+FORECAST_DRAWS = 40
+MIN_REGIME_WEIGHT = 30.0
 SEED = 23
 EWMA_LAMBDA = 0.94
 RADIUS_LIMIT = 0.999
@@ -651,13 +656,60 @@ def _filter_one(
     sigma: np.ndarray,
     transition: np.ndarray,
 ) -> np.ndarray:
-    wrapped = {
-        "c": coef[: sigma.size][None, :],
-        "beta": coef[sigma.size :][None, :],
-        "sigma": sigma[None, :],
-        "trans": transition[None, :, :],
-    }
-    return filter_draws(series, features, wrapped)[:, 0, :]
+    """One-draw filter. Same recursion as ``filter_draws``, without its overhead."""
+
+    regimes = int(sigma.size)
+    signal = features @ coef[regimes:]
+    residual = series[:, None] - signal[:, None] - coef[:regimes]
+    log_emit = (
+        -0.5 * (residual / np.maximum(sigma, 1e-8)) ** 2
+        - np.log(np.maximum(sigma, 1e-8))
+        - 0.5 * np.log(2.0 * np.pi)
+    )
+    return _forward_filter(log_emit, transition, _stationary_distribution(transition))
+
+
+def _forward_filter(
+    log_emit: np.ndarray, transition: np.ndarray, initial: np.ndarray
+) -> np.ndarray:
+    """Forward filter with a scalar inner loop. ``log_emit`` is ``(time, regimes)``."""
+
+    length, regimes = log_emit.shape
+    out = np.empty((length, regimes), dtype=np.float64)
+    emissions = log_emit.tolist()
+    rows = transition.tolist()
+    alpha = [float(value) for value in initial]
+    uniform = 1.0 / float(regimes)
+    for time_index in range(length):
+        if time_index:
+            nxt = [0.0] * regimes
+            for origin, weight in enumerate(alpha):
+                if weight == 0.0:
+                    continue
+                row = rows[origin]
+                for dest in range(regimes):
+                    nxt[dest] += weight * row[dest]
+            alpha = nxt
+        emission = emissions[time_index]
+        peak = -1e300
+        scores = [0.0] * regimes
+        for regime in range(regimes):
+            score = math.log(alpha[regime] if alpha[regime] > 1e-300 else 1e-300) + emission[regime]
+            scores[regime] = score
+            if score > peak:
+                peak = score
+        total = 0.0
+        scaled = [0.0] * regimes
+        for regime, score in enumerate(scores):
+            value = math.exp(score - peak)
+            scaled[regime] = value
+            total += value
+        if total <= 0.0 or not math.isfinite(total):
+            alpha = [uniform] * regimes
+        else:
+            alpha = [value / total for value in scaled]
+        out[time_index] = alpha
+    return out
 
 
 def _backward_sample(
@@ -667,22 +719,34 @@ def _backward_sample(
 ) -> np.ndarray:
     length, regimes = filtered.shape
     states = np.empty(length, dtype=np.int64)
-    states[-1] = int(rng.choice(regimes, p=_probability(filtered[-1])))
+    draws = rng.random(length)
+    probabilities = filtered.tolist()
+    rows = transition.tolist()
+    states[-1] = _categorical(probabilities[-1], float(draws[-1]))
     for time_index in range(length - 2, -1, -1):
-        weights = filtered[time_index] * transition[:, states[time_index + 1]]
-        states[time_index] = int(rng.choice(regimes, p=_probability(weights)))
+        nxt = int(states[time_index + 1])
+        belief = probabilities[time_index]
+        weights = [belief[regime] * rows[regime][nxt] for regime in range(regimes)]
+        states[time_index] = _categorical(weights, float(draws[time_index]))
     return states
 
 
-def _probability(weights: np.ndarray) -> np.ndarray:
-    total = float(np.sum(weights))
-    if total <= 0.0 or not np.isfinite(total):
-        return np.full(weights.size, 1.0 / weights.size)
-    prob = np.maximum(weights, 0.0) / total
-    if float(prob.sum()) <= 0.0:
-        return np.full(weights.size, 1.0 / weights.size)
-    prob[-1] = 1.0 - float(prob[:-1].sum())
-    return np.maximum(prob, 0.0)
+def _categorical(weights: list[float], draw: float) -> int:
+    total = 0.0
+    for weight in weights:
+        if weight > 0.0:
+            total += weight
+    last = len(weights) - 1
+    if total <= 0.0 or not math.isfinite(total):
+        return min(int(draw * len(weights)), last)
+    threshold = draw * total
+    accumulated = 0.0
+    for regime, weight in enumerate(weights):
+        if weight > 0.0:
+            accumulated += weight
+        if accumulated >= threshold:
+            return regime
+    return last
 
 
 def filter_draws(
@@ -720,6 +784,123 @@ def filter_draws(
     return out
 
 
+def propagated_regime_weights(
+    probability: np.ndarray, transition: np.ndarray, horizon: int
+) -> np.ndarray:
+    """Average the filtered regime distribution over the next ``horizon`` days.
+
+    ``probability`` has shape ``(draws, regimes)`` and is the filter at the
+    last observed day. The returned row is the mean of
+    ``probability @ transition**k`` for ``k = 1, ..., horizon``.
+    """
+
+    current = np.asarray(probability, dtype=np.float64)
+    transition = np.asarray(transition, dtype=np.float64)
+    total = np.zeros_like(current)
+    steps = int(horizon)
+    for _step in range(steps):
+        current = np.einsum("ni,nik->nk", current, transition)
+        current = current / np.maximum(current.sum(axis=1, keepdims=True), 1e-300)
+        total += current
+    return total / float(steps)
+
+
+def predictive_weights(
+    filtered: np.ndarray, transition: np.ndarray, positions: np.ndarray, horizon: int
+) -> np.ndarray:
+    """Predictive regime weights at many origins.
+
+    ``filtered`` is ``(time, draws, regimes)`` and ``positions`` indexes the
+    last observed day of each origin. The result has shape
+    ``(origins, draws, regimes)``.
+    """
+
+    current = np.asarray(filtered, dtype=np.float64)[np.asarray(positions, dtype=np.int64)]
+    transition = np.asarray(transition, dtype=np.float64)
+    total = np.zeros_like(current)
+    for _step in range(int(horizon)):
+        current = np.einsum("ndk,dki->ndi", current, transition)
+        current = current / np.maximum(current.sum(axis=-1, keepdims=True), 1e-300)
+        total += current
+    return total / float(horizon)
+
+
+def fit_direct_regime_coefficients(
+    features: np.ndarray,
+    weights: np.ndarray,
+    targets: np.ndarray,
+    *,
+    min_weight: float = MIN_REGIME_WEIGHT,
+) -> np.ndarray:
+    """Weighted direct HAR for one Gibbs draw.
+
+    ``features`` is ``(n, 3)``, ``weights`` is ``(n, regimes)``, and
+    ``targets`` is ``(n,)``. The return value is ``(regimes, 4)``:
+    intercept, then slopes on lags 1, 5, and 22. A regime whose weights
+    sum to less than ``min_weight`` uses the pooled regression.
+    """
+
+    design = np.column_stack((np.ones(features.shape[0]), np.asarray(features, dtype=np.float64)))
+    target = np.asarray(targets, dtype=np.float64)
+    weight = np.asarray(weights, dtype=np.float64)
+    finite = np.isfinite(target) & np.isfinite(design).all(axis=1) & np.isfinite(weight).all(axis=1)
+    design = design[finite]
+    target = target[finite]
+    weight = np.maximum(weight[finite], 0.0)
+    pooled = _ols_coefficients(design, target)
+    if pooled is None:
+        pooled = np.zeros(design.shape[1] if design.size else 4, dtype=np.float64)
+    regimes = weight.shape[1]
+    coef = np.empty((regimes, pooled.size), dtype=np.float64)
+    for regime in range(regimes):
+        column = weight[:, regime]
+        if float(column.sum()) < min_weight:
+            coef[regime] = pooled
+            continue
+        scale = np.sqrt(column)
+        fitted = _ols_coefficients(design * scale[:, None], target * scale)
+        coef[regime] = pooled if fitted is None else fitted
+    return coef
+
+
+def _ols_coefficients(design: np.ndarray, target: np.ndarray) -> np.ndarray | None:
+    if design.shape[0] < design.shape[1] or not np.isfinite(design).all():
+        return None
+    coef, _, rank, _ = np.linalg.lstsq(design, target, rcond=1e-8)
+    if rank < design.shape[1] or not np.all(np.isfinite(coef)):
+        return None
+    return np.asarray(coef, dtype=np.float64)
+
+
+def mixture_log_forecast(
+    features: np.ndarray, weights: np.ndarray, coefficients: np.ndarray
+) -> np.ndarray:
+    """Regime-weighted direct prediction, one column per Gibbs draw.
+
+    ``features`` is ``(n, 3)``, ``weights`` is ``(n, draws, regimes)``, and
+    ``coefficients`` is ``(draws, regimes, 4)``.
+    """
+
+    level = coefficients[None, :, :, 0] + np.einsum(
+        "nf,drf->ndr", np.asarray(features, dtype=np.float64), coefficients[:, :, 1:]
+    )
+    return np.sum(weights * level, axis=2)
+
+
+def training_bias(
+    raw: np.ndarray, actual: np.ndarray, candidates: np.ndarray, origin: int, horizon: int
+) -> np.ndarray:
+    """Mean residual on origins whose ``horizon`` window has already ended.
+
+    ``raw`` has shape ``(n, draws)``. The correction is one number per draw.
+    """
+
+    usable = np.asarray(candidates) + int(horizon) <= int(origin)
+    if not np.any(usable):
+        return np.zeros(raw.shape[1], dtype=np.float64)
+    return (raw[usable] - np.asarray(actual, dtype=np.float64)[usable, None]).mean(axis=0)
+
+
 def simulate_log_mean_square(
     probability: np.ndarray,
     history: np.ndarray,
@@ -728,12 +909,11 @@ def simulate_log_mean_square(
     paths: int,
     rng: np.random.Generator,
 ) -> float:
-    """Posterior predictive mean of ``log(mean r^2)`` over ``horizon`` days.
+    """Previous path forecast of ``log(mean r^2)``.
 
-    ``probability`` is the filtered regime distribution at the origin, one
-    row per Gibbs draw. ``history`` is the last 22 log-variance observations.
-    Each path draws the next regime from the transition row and a Gaussian
-    log variance, then converts it back with ``exp``.
+    Kept so the earlier simulated-path scores can be reproduced. The rolling
+    evaluation no longer calls it. Each path draws a regime and a Gaussian
+    log variance, then converts the draw back with ``exp``.
     """
 
     draw_count = probability.shape[0]
@@ -829,7 +1009,8 @@ def evaluate_returns(
         sweeps: Gibbs sweeps per chain.
         chains: Number of chains.
         refit_every: Origins between refits.
-        paths: Simulated futures per retained draw.
+        paths: Unused by the direct forecast. Retained so older calls
+            still parse; the previous simulated forecast used this count.
         seed: Master seed.
         horizons: Forecast horizons, in days.
         regimes: Number of sticky regimes.
@@ -1016,27 +1197,94 @@ def _regime_forecasts(
             f"accept {float(fit['acceptance'][0]):.2f}",
             flush=True,
         )
+        direct = _direct_forecast_block(
+            returns,
+            features,
+            filtered,
+            forecast_fit["trans"],
+            start=start,
+            left=left,
+            right=right,
+            horizons=horizons,
+        )
         for origin in range(left, right):
             position = origin - 1 - start
             if position < 0 or position >= filtered.shape[0]:
                 continue
-            probability = filtered[position]
-            history = log_var[origin - LAG : origin]
             origin_slot = int(origin - origins[0])
-            probabilities[origin_slot] = probability.mean(axis=0)
+            probabilities[origin_slot] = filtered[position].mean(axis=0)
             for horizon in horizons:
                 column = columns[horizon].get(origin)
-                if column is None:
+                if column is None or origin not in direct[horizon]:
                     continue
-                forecasts[horizon][column] = simulate_log_mean_square(
-                    probability, history, forecast_fit, horizon, paths, rng
-                )
+                forecasts[horizon][column] = direct[horizon][origin]
     diagnostics = {
         "refits": refit_stats,
         "rhat_max": _max_finite(np.array([item["rhat_max"] for item in refit_stats])),
         "loglik_first": first_loglik,
+        "forecast": "direct",
+        "paths": int(paths),
     }
     return forecasts, diagnostics, probabilities, origin_dates
+
+
+def _direct_forecast_block(
+    returns: np.ndarray,
+    features: np.ndarray,
+    filtered: np.ndarray,
+    transition: np.ndarray,
+    *,
+    start: int,
+    left: int,
+    right: int,
+    horizons: tuple[int, ...],
+) -> dict[int, dict[int, float]]:
+    """Bias-corrected direct forecasts for origins in ``[left, right)``.
+
+    Coefficients use origins whose target window ends at or before ``left``.
+    The bias at a later origin also uses windows that ended after the refit
+    and before that origin.
+    """
+
+    squares = np.asarray(returns, dtype=np.float64) ** 2
+    out: dict[int, dict[int, float]] = {horizon: {} for horizon in horizons}
+    earliest = max(LAG, start + 1)
+    for horizon in horizons:
+        training = np.arange(earliest, left - horizon + 1, dtype=np.int64)
+        if training.size == 0:
+            continue
+        training = training[np.isfinite(features[training]).all(axis=1)]
+        if training.size == 0:
+            continue
+        train_pos = training - 1 - start
+        train_weights = predictive_weights(filtered, transition, train_pos, horizon)
+        train_target = np.log(np.maximum(forward_square_mean(squares, horizon)[training], 1e-18))
+        train_features = features[training]
+        draw_count = transition.shape[0]
+        coefficients = np.empty((draw_count, transition.shape[1], 4), dtype=np.float64)
+        for draw in range(draw_count):
+            coefficients[draw] = fit_direct_regime_coefficients(
+                train_features, train_weights[:, draw, :], train_target
+            )
+        candidates = np.arange(earliest, right, dtype=np.int64)
+        candidates = candidates[candidates + horizon <= squares.size]
+        candidates = candidates[np.isfinite(features[candidates]).all(axis=1)]
+        if candidates.size == 0:
+            continue
+        raw = mixture_log_forecast(
+            features[candidates],
+            predictive_weights(filtered, transition, candidates - 1 - start, horizon),
+            coefficients,
+        )
+        actual = np.log(np.maximum(forward_square_mean(squares, horizon)[candidates], 1e-18))
+        lookup = {int(origin): index for index, origin in enumerate(candidates)}
+        for origin in range(left, right):
+            row = lookup.get(origin)
+            if row is None:
+                continue
+            bias = training_bias(raw, actual, candidates, origin, horizon)
+            out[horizon][origin] = float(np.mean(raw[row] - bias))
+    return out
 
 
 def _summarize_fit(fit: dict[str, np.ndarray], origin: int, start: int) -> dict[str, object]:
@@ -1074,7 +1322,6 @@ def _print_report(name: str, result: dict[str, object]) -> None:
                 "sweeps",
                 "chains",
                 "refit_every",
-                "paths",
                 "seed",
                 "regimes",
                 "self_stay_prior",
@@ -1236,7 +1483,7 @@ def _plot_convergence(
     ax.set_xlabel("Gibbs sweep")
     ax.set_ylabel("complete-data log likelihood")
     ax.legend(frameon=False)
-    rhat = result["diagnostics"]["rhat_max"]
+    rhat = float(result["diagnostics"]["refits"][0]["rhat_max"])
     ax.set_title(f"{asset_name}: first refit, max R-hat {rhat:.3f}")
     fig.tight_layout()
     fig.savefig(destination / f"{name}_regime_convergence.png", dpi=140)

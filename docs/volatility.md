@@ -8,7 +8,13 @@ The rolling-origin score below is the log of the mean squared return over the ne
 
 Four baselines are fit only on data before the target window. HAR(1/5/22) is an ordinary least-squares regression of the log-mean target on an intercept, log daily variance, and the log of the 5-day and 22-day mean variance. The long-run mean is the average of those same completed targets. EWMA with decay 0.94 is reported as the log of its flat variance forecast. GARCH(1,1) with Student-t errors, fit with `arch` on the returns up to the origin, is reported as the log of the mean analytic variance over the horizon.
 
-The regime model is a 3-state Markov-switching HAR on daily `log(r^2)`, not the sticky HDP-SLDS. The three HAR slopes are shared. Each regime has its own intercept and innovation scale. Draws whose companion spectral radius is 0.999 or higher are rejected. The Dirichlet prior on each transition row has mean self-stay 0.98 (`alpha = 1`, `kappa = 97`). The forecast is the average, over retained Gibbs draws and 25 simulated paths per draw, of `log(mean r^2)` given the filtered regime probabilities at the origin. Parameters are refit every 21 origins on a trailing 4-year window: 1008 trading days for the S&P 500 and 1460 calendar days for bitcoin. Each refit is 3 chains of 500 sweeps from seed 23. Forecasts use 80 evenly spaced draws from the second half of each chain. The sweep count was set from the Gelman-Rubin statistic on the training window that ends at the first holdout origin. Nothing in the prior, the window, or the refit schedule was chosen on the holdout.
+The regime model is a 3-state Markov-switching HAR on daily `log(r^2)`, not the sticky HDP-SLDS. The Gibbs step still uses one shared HAR slope, with a separate intercept and innovation scale in each regime. Draws whose companion spectral radius is 0.999 or higher are rejected. The Dirichlet prior on each transition row has mean self-stay 0.98 (`alpha = 1`, `kappa = 97`). That sampler is only there to produce regime probabilities and a transition matrix.
+
+The scored forecast does not simulate a path. For each horizon, each retained draw gets its own direct regression of `log(mean r^2)` over the next `h` days on an intercept and three lags of daily `log(r^2)`: the previous day, the mean of the previous 5, and the mean of the previous 22. Each regime has its own intercept and its own three slopes. An origin is weighted by the average of the filtered distribution after 1 through `h` steps of that draw's transition matrix. A regime whose weights sum to less than 30 uses the pooled regression. The reported forecast is the average, over draws, of that weighted prediction minus the draw's mean residual. The residual is computed only on origins whose `h`-day window has already ended, so the correction never sees the origin being scored. Nothing is exponentiated.
+
+Parameters are refit every 21 origins on a trailing 4-year window: 1008 trading days for the S&P 500 and 1460 calendar days for bitcoin. Each refit is 4 chains of 2000 sweeps from seed 23. Forecasts use 40 evenly spaced draws from the second half of each chain, 160 draws in total. The sweep count was raised until the worst refit on both holdouts had R-hat below 1.1. Nothing in the prior, the window, or the refit schedule was chosen on the holdout.
+
+The "Simulated" column is the previous forecast, kept for comparison and not re-estimated. That run drew 25 Gaussian paths per retained draw, exponentiated them, and averaged `log(mean r^2)`. It used 3 chains of 500 sweeps. Its HAR, EWMA, and mean columns match the tables below at three decimals. Its GARCH column had 10 Bitcoin failures; this run has 9, so the GARCH numbers below are this run's.
 
 Exact zero returns, five in the S&P file and one in the Bitcoin file, are replaced in `log(r^2)` by the smallest positive square in the estimation sample.
 
@@ -23,31 +29,31 @@ uv run python examples/regime_volatility.py btc
 
 ![RMSE by horizon](img/sp500_regime_horizon.png)
 
-The run took 425.9 s. GARCH converged at every origin. The worst refit had R-hat 1.148.
+The run took 312.5 s. GARCH converged at every origin. The worst refit had R-hat 1.023. Every refit is between 1.004 and 1.023.
 
-RMSE of log mean squared return. The lowest value on a row is the winner.
+RMSE of log mean squared return. Direct is this run. Simulated is the previous path forecast. The lowest value on a row is the winner.
 
-| Lead (days) | Origins | Regime | HAR | EWMA 0.94 | GARCH-t | Mean |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1 | 250 | 2.750 | 2.706 | 3.097 | 3.152 | 2.696 |
-| 5 | 246 | 0.891 | 0.820 | 0.856 | 0.901 | 0.807 |
-| 20 | 231 | 0.850 | 0.549 | 0.568 | 0.618 | 0.480 |
-| 60 | 191 | 0.992 | 0.419 | 0.450 | 0.516 | 0.307 |
+| Lead (days) | Origins | Direct | Simulated | HAR | EWMA 0.94 | GARCH-t | Mean |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 250 | 2.708 | 2.750 | 2.706 | 3.097 | 3.152 | 2.696 |
+| 5 | 246 | 0.855 | 0.891 | 0.820 | 0.856 | 0.901 | 0.807 |
+| 20 | 231 | 0.567 | 0.850 | 0.549 | 0.568 | 0.618 | 0.480 |
+| 60 | 191 | 0.393 | 0.992 | 0.419 | 0.450 | 0.516 | 0.307 |
 
-Diebold-Mariano statistic of the regime model against each baseline, with the two-sided p-value in parentheses.
+Diebold-Mariano statistic of the direct regime model against each baseline, with the two-sided p-value in parentheses. The simulated column is not in this test.
 
 | Lead (days) | vs HAR | vs mean | vs EWMA | vs GARCH |
 | --- | ---: | ---: | ---: | ---: |
-| 1 | 1.40 (0.162) | 1.83 (0.067) | -4.14 (3.5e-5) | -4.48 (7.5e-6) |
-| 5 | 1.61 (0.108) | 1.95 (0.052) | 1.18 (0.240) | -0.33 (0.742) |
-| 20 | 2.86 (0.004) | 3.65 (2.6e-4) | 2.71 (0.007) | 2.95 (0.003) |
-| 60 | 4.89 (1.0e-6) | 5.93 (3.0e-9) | 3.71 (2.1e-4) | 5.87 (4.2e-9) |
+| 1 | 0.14 (0.889) | 0.61 (0.541) | -4.61 (4.0e-6) | -4.88 (1.0e-6) |
+| 5 | 1.09 (0.277) | 1.21 (0.225) | -0.04 (0.965) | -1.17 (0.241) |
+| 20 | 0.50 (0.617) | 2.39 (0.017) | -0.01 (0.990) | -1.26 (0.209) |
+| 60 | -0.86 (0.389) | 1.89 (0.058) | -1.18 (0.239) | -1.57 (0.115) |
 
-The long-run mean has the lowest RMSE at every horizon. At one day the regime model beats EWMA and GARCH, and the gap against HAR and the mean is not distinguishable from noise. From 20 days on, every baseline beats the regime model. The regime forecast's mean error is +0.103, +0.298, +0.650, and +0.929 at leads 1, 5, 20, and 60: it sits above the realized log mean, and the gap grows with the horizon. EWMA's mean error goes the other way, from +1.519 at one day to +0.001 at 60 days. A one-day EWMA or GARCH number is the log of a variance, while the target is the log of a squared return, so those two baselines pay Jensen's gap at short horizons. The direct HAR and the mean are regressions on the target itself, and they do not.
+The long-run mean still has the lowest RMSE at every horizon. The direct forecast is not distinguishable from HAR at any lead. At 60 days its RMSE is below HAR, EWMA, and GARCH, and the gap against the mean is not significant at 5%. It beats one-day EWMA and GARCH. The mean error is +0.102, +0.107, +0.101, and +0.152 at leads 1, 5, 20, and 60. The simulated forecast's errors on those same leads were +0.103, +0.298, +0.650, and +0.929, and that gap grew with the horizon. EWMA's mean error still goes from +1.519 at one day to +0.001 at 60 days, because a one-day EWMA or GARCH number is the log of a variance and the target is the log of a squared return.
 
 ![Filtered regime probabilities and the one-day target](img/sp500_regime_probs.png)
 
-On the first refit the posterior mean self-stay is 0.815, 0.953, and 0.896, so the implied runs last 5.4, 21.1, and 9.6 days. The prior mean was 0.98. Later refits stay in that neighborhood: the average self-stay across the three regimes drifts from 0.888 to 0.861. Ordered intercepts on the first refit are -5.849, -4.394, and -3.304, with shares 0.261, 0.269, and 0.470. The shared slopes are -0.101, 0.074, and 0.632, and the companion radius is 0.962. Every regression draw met the radius constraint. The second-half complete-data log likelihood on that refit has mean -2563 and standard deviation 39.
+On the first refit the posterior mean self-stay is 0.813, 0.953, and 0.896, so the implied runs last 5.3, 21.2, and 9.6 days. The prior mean was 0.98. Later refits stay in that neighborhood: the average self-stay across the three regimes drifts from 0.887 to 0.864. Ordered intercepts on the first refit are -5.804, -4.315, and -3.217, with shares 0.248, 0.274, and 0.477. The shared daily slopes are -0.103, 0.084, and 0.633, and the companion radius is 0.962. Every regression draw met the radius constraint. The second-half complete-data log likelihood on that refit has mean -2560 and standard deviation 38.
 
 ![Three chains on the first refit](img/sp500_regime_convergence.png)
 
@@ -57,33 +63,33 @@ On the first refit the posterior mean self-stay is 0.815, 0.953, and 0.896, so t
 
 ![RMSE by horizon](img/btc_regime_horizon.png)
 
-The run took 891.3 s. GARCH did not converge at 10 origins. Those origins are omitted from the GARCH RMSE and from the DM test against GARCH, and they stay in the other columns. The worst refit had R-hat 1.305. Three refits exceeded 1.2, so one scale or intercept on those windows has not fully settled. The other fifteen refits are between 1.039 and 1.175.
+The run took 651.1 s. GARCH did not converge at 9 origins. Those origins are omitted from the GARCH RMSE and from the DM test against GARCH, and they stay in the other columns. The worst refit had R-hat 1.079. The other seventeen refits are between 1.008 and 1.056.
 
-| Lead (days) | Origins | Regime | HAR | EWMA 0.94 | GARCH-t | Mean |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1 | 365 | 2.673 | 2.610 | 3.133 | 3.327 | 2.691 |
-| 5 | 361 | 1.109 | 1.022 | 1.121 | 1.279 | 1.162 |
-| 20 | 346 | 0.998 | 0.797 | 0.849 | 0.993 | 0.900 |
-| 60 | 306 | 0.983 | 0.718 | 0.791 | 1.083 | 0.785 |
+| Lead (days) | Origins | Direct | Simulated | HAR | EWMA 0.94 | GARCH-t | Mean |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 365 | 2.638 | 2.673 | 2.610 | 3.133 | 3.323 | 2.691 |
+| 5 | 361 | 1.022 | 1.109 | 1.022 | 1.121 | 1.274 | 1.162 |
+| 20 | 346 | 0.742 | 0.998 | 0.797 | 0.849 | 0.985 | 0.900 |
+| 60 | 306 | 0.598 | 0.983 | 0.718 | 0.791 | 1.074 | 0.785 |
 
 | Lead (days) | vs HAR | vs mean | vs EWMA | vs GARCH |
 | --- | ---: | ---: | ---: | ---: |
-| 1 | 2.35 (0.019) | -0.39 (0.696) | -5.56 (2.8e-8) | -6.58 (4.6e-11) |
-| 5 | 2.44 (0.015) | -0.95 (0.344) | -0.27 (0.790) | -2.55 (0.011) |
-| 20 | 4.14 (3.5e-5) | 2.38 (0.018) | 1.37 (0.171) | 0.26 (0.798) |
-| 60 | 3.37 (7.4e-4) | 3.40 (6.6e-4) | 0.91 (0.363) | -1.38 (0.168) |
+| 1 | 1.23 (0.217) | -1.43 (0.153) | -6.19 (5.9e-10) | -7.22 (5.3e-13) |
+| 5 | -0.01 (0.989) | -2.46 (0.014) | -2.09 (0.036) | -3.57 (3.6e-4) |
+| 20 | -1.54 (0.123) | -1.96 (0.049) | -1.51 (0.130) | -3.51 (4.4e-4) |
+| 60 | -1.78 (0.075) | -1.46 (0.145) | -1.43 (0.153) | -3.46 (5.3e-4) |
 
-HAR has the lowest RMSE at every horizon. The regime model beats EWMA and GARCH at one day, and it beats GARCH at five days. Against the long-run mean at one and five days the DM tests do not separate them. HAR is ahead of the regime model at every horizon, including one day. At 20 and 60 days the regime model also loses to the mean. Its mean error is +0.099, +0.327, +0.627, and +0.805. The same high bias as on the S&P 500: the Gaussian draws of `log(r^2)`, once exponentiated and averaged, put too much weight in the right tail.
+HAR has the lowest one-day RMSE. From five days on the direct forecast is tied with HAR or ahead of it on RMSE, and at 20 and 60 days it is the lowest of the six columns. The five-day tie with HAR is exact at three decimals (DM -0.01, p = 0.989). The 20-day and 60-day gaps against HAR are not significant at 5% (p = 0.123 and 0.075). The direct forecast does beat the mean at 5 and 20 days, EWMA at 1 and 5 days, and GARCH at every horizon. Its mean error is +0.102, +0.175, +0.210, and +0.225. The simulated forecast's errors were +0.099, +0.327, +0.627, and +0.805.
 
 ![Filtered regime probabilities and the one-day target](img/btc_regime_probs.png)
 
-The first refit's posterior self-stay is 0.858, 0.961, and 0.886, with implied runs of 7.0, 25.9, and 8.7 days. Ordered intercepts are -5.772, -4.279, and -3.275, with shares 0.252, 0.414, and 0.334. Slopes are 0.045, -0.213, and 0.695, and the companion radius is 0.957. The second-half log likelihood has mean -3773 and standard deviation 69.
+The first refit's posterior self-stay is 0.848, 0.958, and 0.902, with implied runs of 6.6, 23.8, and 10.3 days. Ordered intercepts are -5.878, -4.262, and -3.331, with shares 0.219, 0.426, and 0.355. The shared daily slopes are 0.048, -0.205, and 0.687, and the companion radius is 0.957. The second-half log likelihood has mean -3759 and standard deviation 69. The average self-stay drifts from 0.903 on the first refit to 0.875 on the last.
 
 ![Three chains on the first refit](img/btc_regime_convergence.png)
 
 ### Where this still loses
 
-The overlapping 20-day and 30-day target is gone, the slopes are stationary, and each regime has an intercept. Two facts remain. Daily `log(r^2)` is a noisy series: the one-day RMSE is about 2.7, and the posterior self-stay settles near 0.86 to 0.90 rather than the prior mean of 0.98, so a typical run is days to a few weeks. The multi-day score then exposes the Gaussian emission. `exp` of those draws overstates the mean of `r^2`, and the bias grows from about 0.1 at one day to about 0.8 or 0.9 at 60 days. Direct HAR and the historical mean forecast the aggregated target in one step, so they never simulate that tail. On this sample the sticky regime HAR does not beat them at 20 or 60 days.
+The direct regression removes the horizon-growing bias of the simulated path. What remains is smaller. Daily `log(r^2)` is still a noisy series: the one-day RMSE is about 2.6 to 2.7, and the posterior self-stay settles near 0.86 to 0.90 rather than the prior mean of 0.98, so a typical run is days to a few weeks. On the S&P 500 the long-run mean wins every horizon, and the direct model is not separable from HAR. On bitcoin the direct model has the best point forecast at 20 and 60 days, the win over GARCH is clear, and the win over HAR is not significant at 5%. A positive mean error of about 0.10 on the S&P 500 and 0.10 to 0.22 on bitcoin is still there after the training-window correction.
 
 A separate check, with one HAR fit on lags 5, 22, and 66 before the holdout and an EWMA bias correction fit on that same training span, matches the rolling-origin note supplied with the data: S&P 500 lead 20 is EWMA 0.562, HAR 0.522, mean 0.481, and lead 60 is 0.451, 0.375, 0.310. Bitcoin lead 20 is 0.845, 0.762, 0.910, and lead 60 is 0.789, 0.684, 0.792. The tables above are the stricter protocol: HAR(1/5/22) refit at each origin, and EWMA and GARCH with no additive correction.
 

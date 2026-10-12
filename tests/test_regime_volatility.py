@@ -7,17 +7,23 @@ from examples.regime_volatility import (
     LAG,
     PRIOR_ALPHA,
     PRIOR_KAPPA,
+    _direct_forecast_block,
     diebold_mariano,
     direct_har_forecasts,
     evaluate_returns,
     expected_self_stay,
     feature_matrix,
     filter_draws,
+    fit_direct_regime_coefficients,
     fit_gibbs,
     forward_square_mean,
     garch_log_forecasts,
     har_spectral_radius,
     log_squares,
+    mixture_log_forecast,
+    positive_floor,
+    propagated_regime_weights,
+    training_bias,
 )
 from examples.sp500_forecast import garch_variance_leads
 
@@ -156,6 +162,85 @@ def test_garch_log_mean_matches_the_analytic_path() -> None:
     bumped[300:] += 0.2
     again, _failed = garch_log_forecasts(bumped, origin[:1], (1,))
     assert np.isclose(again[1][0], forecasts[1][0])
+
+
+def test_propagated_weights_average_the_horizon() -> None:
+    probability = np.array([[1.0, 0.0, 0.0]])
+    transition = np.array([[[0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]]])
+    one_step = propagated_regime_weights(probability, transition, 1)
+    three_steps = propagated_regime_weights(probability, transition, 3)
+    assert np.allclose(one_step, [[0.0, 1.0, 0.0]])
+    assert np.allclose(three_steps, np.full((1, 3), 1.0 / 3.0))
+    assert np.allclose(three_steps.sum(axis=1), 1.0)
+
+
+def test_direct_regression_keeps_separate_regime_slopes() -> None:
+    count = 80
+    features = np.random.default_rng(3).normal(size=(count, 3))
+    design = np.column_stack((np.ones(count), features))
+    low = np.array([0.5, 2.0, -0.3, 0.4])
+    high = np.array([-0.5, -1.0, 0.2, 0.1])
+    target = np.empty(count)
+    target[:40] = design[:40] @ low
+    target[40:] = design[40:] @ high
+    weights = np.zeros((count, 2))
+    weights[:40, 0] = 1.0
+    weights[40:, 1] = 1.0
+    coef = fit_direct_regime_coefficients(features, weights, target, min_weight=10)
+    assert np.allclose(coef[0], low)
+    assert np.allclose(coef[1], high)
+
+
+def test_mixture_forecast_is_the_weighted_regime_fit() -> None:
+    features = np.array([[1.0, 0.0, 0.0]])
+    weights = np.array([[[0.25, 0.75]]])
+    coef = np.array([[[0.0, 2.0, 0.0, 0.0], [1.0, -1.0, 0.0, 0.0]]])
+    prediction = mixture_log_forecast(features, weights, coef)
+    assert np.allclose(prediction, [[0.5]])
+
+
+def test_training_bias_stops_at_the_origin() -> None:
+    raw = np.array([[1.0], [3.0], [9.0]])
+    actual = np.array([0.0, 1.0, 0.0])
+    candidates = np.array([10, 20, 30])
+    bias = training_bias(raw, actual, candidates, 26, 5)
+    assert np.allclose(bias, [1.5])
+    shifted = actual.copy()
+    shifted[2] = 100.0
+    assert np.allclose(training_bias(raw, shifted, candidates, 26, 5), bias)
+
+
+def test_direct_block_ignores_returns_after_the_origin() -> None:
+    rng = np.random.default_rng(12)
+    returns = rng.normal(0.0, 0.01, size=220)
+    logged = log_squares(returns, positive_floor(returns))
+    features = feature_matrix(logged)
+    draws = 2
+    regimes = 2
+    filtered = np.zeros((returns.size, draws, regimes))
+    filtered[:, :, 0] = 0.7
+    filtered[:, :, 1] = 0.3
+    transition = np.zeros((draws, regimes, regimes))
+    transition[:, :, :] = np.array([[0.9, 0.1], [0.2, 0.8]])
+    kwargs = {
+        "filtered": filtered,
+        "transition": transition,
+        "start": 0,
+        "left": 180,
+        "right": 200,
+        "horizons": (1, 5),
+    }
+    first = _direct_forecast_block(returns, features, **kwargs)
+    changed = returns.copy()
+    changed[180:] += 0.08
+    second = _direct_forecast_block(changed, features, **kwargs)
+    assert np.isclose(first[1][180], second[1][180])
+    assert np.isclose(first[5][180], second[5][180])
+    past = returns.copy()
+    past[100] += 0.08
+    past_features = feature_matrix(log_squares(past, positive_floor(past)))
+    third = _direct_forecast_block(past, past_features, **kwargs)
+    assert not np.isclose(first[1][180], third[1][180])
 
 
 def test_log_squares_replaces_exact_zeros() -> None:

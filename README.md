@@ -14,37 +14,33 @@ The 2.35 rad release does not hold that rate. Its 90% band covers 78.8% of the h
 
 ## Volatility
 
-![S&P 500 annualized and log 20-day realized volatility, 90% band, and the holdout](docs/img/sp500_forecast.png)
+![S&P 500 rolling-origin RMSE of log mean squared return](docs/img/sp500_regime_horizon.png)
 
-`examples/volatility_forecast.py` forecasts log realized volatility for one daily dataset. The return is the second observation. Nothing is fit to the holdout. The baselines are the last realized-volatility window held flat, EWMA with decay 0.94, and a GARCH(1,1) Student-t fit with `arch` on the training returns. GARCH is converted with that same window: 20 trading days for the S&P 500, 30 calendar days for bitcoin. The table is RMSE of log volatility. The lowest value on each row is the winner.
+`examples/regime_volatility.py` scores the log of the mean squared return over the next 1, 5, 20, and 60 days, at every holdout origin. The S&P 500 holdout is the last 250 trading days. Bitcoin's is the last 365 calendar days. The regime model is a 3-state sticky HAR on daily `log(r^2)`, refit every 21 origins on a trailing 4-year window. Baselines are HAR(1/5/22), the expanding mean of the target, EWMA 0.94, and GARCH(1,1) Student-t. Each baseline uses only data before the target window. Diebold-Mariano tests are on the [volatility page](https://kosmitive.github.io/sticky-hdp-slds-hmm/volatility/). A negative statistic there means the regime model has the smaller squared error.
 
-The S&P 500 holds out the last 250 trading days. Bitcoin trades every day, so the series is a 7-day calendar, the window is 30 days, annualization is `sqrt(365)`, and the holdout is the last 365 days. The close files are in `examples/data/`: Yahoo Finance chart API daily closes, interval 1d, downloaded 2026-10-11. The S&P file keeps the 2001-09-10 to 2001-09-17 market closure. The Bitcoin file drops 2026-10-11, the download date. The fit uses the whole history before each holdout. See `examples/data/README.md`.
+The close files are in `examples/data/`: Yahoo Finance chart API daily closes, interval 1d, downloaded 2026-10-11. The S&P file keeps the 2001-09-10 to 2001-09-17 market closure. The Bitcoin file drops 2026-10-11, the download date. See `examples/data/README.md`.
 
-S&P 500:
+S&P 500. The long-run mean wins every horizon.
 
-| Lead (days) | SLDS | Trailing | EWMA 0.94 | GARCH-t |
-| --- | ---: | ---: | ---: | ---: |
-| 1 | 0.068 | 0.094 | 0.074 | 0.059 |
-| 5 | 0.072 | 0.101 | 0.041 | 0.044 |
-| 20 | 0.145 | 0.178 | 0.041 | 0.150 |
-| 60 | 0.180 | 0.181 | 0.163 | 0.350 |
-| 250 | 0.229 | 0.228 | 0.217 | 0.487 |
+| Lead (days) | Regime | HAR | EWMA 0.94 | GARCH-t | Mean |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1 | 2.750 | 2.706 | 3.097 | 3.152 | 2.696 |
+| 5 | 0.891 | 0.820 | 0.856 | 0.901 | 0.807 |
+| 20 | 0.850 | 0.549 | 0.568 | 0.618 | 0.480 |
+| 60 | 0.992 | 0.419 | 0.450 | 0.516 | 0.307 |
 
-GARCH wins day 1. EWMA wins every longer lead. Both 90% bands cover the whole holdout, so those bands are wide.
+Bitcoin. HAR wins every horizon. GARCH missed 10 origins.
 
-Bitcoin, log 30-day realized volatility. Leads 1, 5, and 20 still contain known returns. Lead 60 does not.
+| Lead (days) | Regime | HAR | EWMA 0.94 | GARCH-t | Mean |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1 | 2.673 | 2.610 | 3.133 | 3.327 | 2.691 |
+| 5 | 1.109 | 1.022 | 1.121 | 1.279 | 1.162 |
+| 20 | 0.998 | 0.797 | 0.849 | 0.993 | 0.900 |
+| 60 | 0.983 | 0.718 | 0.791 | 1.083 | 0.785 |
 
-| Lead (days) | SLDS | Trailing | EWMA 0.94 | GARCH-t |
-| --- | ---: | ---: | ---: | ---: |
-| 1 | 0.012 | 0.011 | 0.004 | 0.021 |
-| 5 | 0.055 | 0.069 | 0.014 | 0.047 |
-| 20 | 0.069 | 0.106 | 0.075 | 0.219 |
-| 60 | 0.074 | 0.150 | 0.094 | 0.421 |
-| 365 | 0.409 | 0.300 | 0.316 | 1.116 |
+The regime model beats EWMA and GARCH at one day, where those two report the log of a variance rather than the log of a squared return. It does not beat HAR at any horizon on either series. At 20 and 60 days its forecast is biased high, by about 0.65 and 0.93 on the S&P 500 and by about 0.63 and 0.81 on bitcoin, and the direct HAR and the historical mean are ahead of it.
 
-EWMA wins day 1 and lead 5. The SLDS wins leads 20 and 60. The trailing 30-day value wins the full 365 days, and GARCH is the worst there. The SLDS 90% band covers 85.5% of that holdout. The GARCH band covers 98.4%, which is a wide band next to its RMSE of 1.116.
-
-The return forecast is close to unpredictable: 0.711 against 0.704 for predicting zero on the S&P 500, and 0.670 against 0.657 on bitcoin. The conversion, the bands, and the mode split are on the [volatility page](https://kosmitive.github.io/sticky-hdp-slds-hmm/volatility/).
+An earlier single-origin sticky HDP-SLDS comparison, on an overlapping realized-volatility target, is on the same page. On that score EWMA wins the longer S&P leads, and the SLDS wins Bitcoin leads 20 and 60.
 
 Documentation: [https://kosmitive.github.io/sticky-hdp-slds-hmm/](https://kosmitive.github.io/sticky-hdp-slds-hmm/).
 
@@ -90,7 +86,8 @@ The smoke script builds a two-mode system in two latent dimensions, simulates tw
 | `examples/smoke_slds.py` | Short end-to-end run |
 | `examples/pendulum_demo.py` | Noisy pendulum, with the figures below |
 | `examples/pendulum_forecast.py` | 80-step forecast from that fit |
-| `examples/volatility_forecast.py` | S&P 500 or Bitcoin volatility forecast |
+| `examples/volatility_forecast.py` | Single-origin S&P 500 or Bitcoin forecast |
+| `examples/regime_volatility.py` | Rolling-origin sticky regime HAR |
 | `examples/sp500_forecast.py` | S&P 500 entry point |
 | `examples/btc_forecast.py` | Bitcoin entry point, 30-day window |
 | `tests/` | Regression tests for the sampler |

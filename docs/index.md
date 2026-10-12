@@ -10,7 +10,7 @@ Gibbs sampling for a sticky hierarchical Dirichlet process switching linear dyna
 
 `examples/pendulum_forecast.py` fits the published series (seed 11, 300 sweeps) and scores 150 futures from sweeps 151–300. Pooled over four traces and both channels, the predictive mean has RMSE 0.148 on the first 10 steps and 1.456 over all 80. Repeating the last observation scores 1.446 and 3.032 on those same windows. The central 90% band covers 98.8% of the first 10 steps and 94.5% of the horizon.
 
-The 2.35 rad release does not hold that rate. Its 90% band covers 78.8% of the horizon and 42.5% of the last 20-step block. The [results](results.md) page records the fit, the per-trace split, and how the forecast is drawn. The [volatility](volatility.md) page scores the same sampler on daily S&P 500 and bitcoin closes. The S&P target is log 20-day realized volatility. Bitcoin, which trades every calendar day, uses a 30-day window and a 365-day holdout. The return is the second observation and is close to unpredictable.
+The 2.35 rad release does not hold that rate. Its 90% band covers 78.8% of the horizon and 42.5% of the last 20-step block. The [results](results.md) page records the fit, the per-trace split, and how the forecast is drawn. The [volatility](volatility.md) page scores daily S&P 500 and bitcoin closes two ways. The rolling-origin score is the log of mean squared return over the next 1, 5, 20, and 60 days, from a 3-regime sticky HAR. An earlier single-origin score uses the sticky HDP-SLDS on overlapping realized volatility.
 
 The sampler alternates between:
 

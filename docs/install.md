@@ -8,7 +8,7 @@ uv run pytest
 uv run python examples/smoke_slds.py
 ```
 
-`uv sync` installs the package and the `dev` group (pytest, ruff, pre-commit). The documentation group is separate:
+`uv sync` installs the package and the `dev` group (pytest, ruff, pre-commit, and the `examples` group). The volatility scripts use `arch` from that examples group. The documentation group is separate:
 
 ```bash
 uv sync --group docs
@@ -22,6 +22,10 @@ The smoke script builds a two-mode system in two latent dimensions, simulates tw
 ```bash
 uv run python examples/pendulum_demo.py
 uv run python examples/pendulum_forecast.py
+uv run python examples/volatility_forecast.py sp500
+uv run python examples/volatility_forecast.py btc
+uv run python examples/regime_volatility.py sp500
+uv run python examples/regime_volatility.py btc
 ```
 
 `pendulum_demo.py` accepts a sweep count as its only argument. The default is 300. The forecast script uses that same default and does not read the holdout while fitting.
@@ -38,6 +42,11 @@ uv run python examples/pendulum_forecast.py
 | `examples/smoke_slds.py` | Short end-to-end run |
 | `examples/pendulum_demo.py` | Noisy pendulum fit |
 | `examples/pendulum_forecast.py` | 80-step forecast from that fit |
+| `examples/volatility_forecast.py` | Single-origin S&P 500 or Bitcoin forecast |
+| `examples/regime_volatility.py` | Rolling-origin sticky regime HAR |
+| `examples/sp500_forecast.py` | S&P 500 entry point for the single-origin script |
+| `examples/btc_forecast.py` | Bitcoin entry point, 30-day window |
+| `examples/data/` | Close snapshots used by those two scripts |
 | `tests/` | Regression tests for the sampler |
 
 Checked-in packs still use the historical filenames: `P0.npy` is the emission scale and `R0.npy` is the latent covariance. Load also accepts the honest assignment when the two arrays have different sizes.

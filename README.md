@@ -12,6 +12,36 @@ Gibbs sampling for a sticky hierarchical Dirichlet process switching linear dyna
 
 The 2.35 rad release does not hold that rate. Its 90% band covers 78.8% of the horizon and 42.5% of the last 20-step block.
 
+## Volatility
+
+![S&P 500 rolling-origin RMSE of log mean squared return](docs/img/sp500_regime_horizon.png)
+
+`examples/regime_volatility.py` scores the log of the mean squared return over the next 1, 5, 20, and 60 days, at every holdout origin. The S&P 500 holdout is the last 250 trading days. Bitcoin's is the last 365 calendar days. The regime model is a 3-state sticky HAR on daily `log(r^2)`, refit every 21 origins on a trailing 4-year window. The scored forecast is a direct regression at each horizon, with a separate intercept and HAR slopes in each regime, weighted by the filtered probabilities after they are moved forward with the transition matrix. A bias correction uses only windows that have already ended. Baselines are HAR(1/5/22), the expanding mean of the target, EWMA 0.94, and GARCH(1,1) Student-t. Each baseline uses only data before the target window. Diebold-Mariano tests are on the [volatility page](https://kosmitive.github.io/sticky-hdp-slds-hmm/volatility/). A negative statistic there means the regime model has the smaller squared error.
+
+The close files are in `examples/data/`: Yahoo Finance chart API daily closes, interval 1d, downloaded 2026-10-11. The S&P file keeps the 2001-09-10 to 2001-09-17 market closure. The Bitcoin file drops 2026-10-11, the download date. See `examples/data/README.md`.
+
+S&P 500. The long-run mean wins every horizon. Direct is this run. Simulated is the previous path forecast and was not re-estimated.
+
+| Lead (days) | Direct | Simulated | HAR | EWMA 0.94 | GARCH-t | Mean |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 2.708 | 2.750 | 2.706 | 3.097 | 3.152 | 2.696 |
+| 5 | 0.855 | 0.891 | 0.820 | 0.856 | 0.901 | 0.807 |
+| 20 | 0.567 | 0.850 | 0.549 | 0.568 | 0.618 | 0.480 |
+| 60 | 0.393 | 0.992 | 0.419 | 0.450 | 0.516 | 0.307 |
+
+Bitcoin. The direct forecast has the lowest RMSE at 20 and 60 days. GARCH missed 9 origins.
+
+| Lead (days) | Direct | Simulated | HAR | EWMA 0.94 | GARCH-t | Mean |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 2.638 | 2.673 | 2.610 | 3.133 | 3.323 | 2.691 |
+| 5 | 1.022 | 1.109 | 1.022 | 1.121 | 1.274 | 1.162 |
+| 20 | 0.742 | 0.998 | 0.797 | 0.849 | 0.985 | 0.900 |
+| 60 | 0.598 | 0.983 | 0.718 | 0.791 | 1.074 | 0.785 |
+
+On the S&P 500 the direct model is not distinguishable from HAR, and it beats one-day EWMA and GARCH. On bitcoin it beats the mean at 5 and 20 days and GARCH at every horizon. The gaps against HAR are not significant at 5%. The simulated path was biased high by about 0.65 and 0.93 on the S&P 500 at 20 and 60 days, and by about 0.63 and 0.81 on bitcoin. The direct forecast's mean errors on those leads are 0.10 and 0.15, and 0.21 and 0.22.
+
+An earlier single-origin sticky HDP-SLDS comparison, on an overlapping realized-volatility target, is on the same page. On that score EWMA wins the longer S&P leads, and the SLDS wins Bitcoin leads 20 and 60.
+
 Documentation: [https://kosmitive.github.io/sticky-hdp-slds-hmm/](https://kosmitive.github.io/sticky-hdp-slds-hmm/).
 
 The sampler alternates between:
@@ -35,7 +65,7 @@ uv run python examples/smoke_slds.py
 uv run pre-commit install
 ```
 
-`uv sync` installs the package and the `dev` group (pytest, ruff, pre-commit). Add the docs group when you want the site:
+`uv sync` installs the package and the `dev` group (pytest, ruff, pre-commit, and the `examples` group). The volatility scripts use `arch` from that examples group. Add the docs group when you want the site:
 
 ```bash
 uv sync --group docs
@@ -56,6 +86,10 @@ The smoke script builds a two-mode system in two latent dimensions, simulates tw
 | `examples/smoke_slds.py` | Short end-to-end run |
 | `examples/pendulum_demo.py` | Noisy pendulum, with the figures below |
 | `examples/pendulum_forecast.py` | 80-step forecast from that fit |
+| `examples/volatility_forecast.py` | Single-origin S&P 500 or Bitcoin forecast |
+| `examples/regime_volatility.py` | Rolling-origin sticky regime HAR |
+| `examples/sp500_forecast.py` | S&P 500 entry point |
+| `examples/btc_forecast.py` | Bitcoin entry point, 30-day window |
 | `tests/` | Regression tests for the sampler |
 | `docs/` | This site's source |
 

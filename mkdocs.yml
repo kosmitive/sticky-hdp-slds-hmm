@@ -15,7 +15,10 @@ theme:
 
 nav:
   - Results: results.md
-  - Volatility: volatility.md
+  - Volatility:
+      - Overview: volatility.md
+      - Bitcoin: volatility.md#bitcoin
+      - S&P 500: volatility.md#sp-500
   - Inference: inference.md
   - Overview: index.md
   - Install and usage: install.md

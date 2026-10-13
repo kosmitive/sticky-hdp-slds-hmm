@@ -30,8 +30,8 @@ The smoke script builds a two-mode system in two latent dimensions, simulates tw
 ```bash
 uv run python -m examples.pendulum_demo
 uv run python -m examples.pendulum_forecast
-uv run python -m examples.regime_volatility sp500
 uv run python -m examples.regime_volatility btc
+uv run python -m examples.regime_volatility sp500
 ```
 
 `pendulum_demo.py` and `pendulum_forecast.py` accept a sweep count as their only argument. The default is 300. The forecast fits the training window only. `regime_volatility.py` accepts one or more dataset names and an optional sweep count. The default is 4 chains of 2000 sweeps.
@@ -45,6 +45,6 @@ uv run python -m examples.regime_volatility btc
 | `examples/pendulum_demo.py` | Noisy pendulum fit |
 | `examples/pendulum_forecast.py` | 80-step forecast from the blocked sampler |
 | `examples/regime_volatility.py` | Plots and the command line for the rolling-origin study |
-| `examples/data/` | S&P 500 and Bitcoin close snapshots |
+| `examples/data/` | Bitcoin and S&P 500 close snapshots |
 | `tests/` | Unit checks and stored-reference regressions |
 | `docs/` | This site's source |

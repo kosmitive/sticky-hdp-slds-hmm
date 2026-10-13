@@ -7,14 +7,16 @@ name = "sticky-hdp-slds"
 version = "0.1.0"
 description = "Sticky hierarchical Dirichlet process switching linear dynamical system (Fox et al., arXiv:1003.3829)."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Markus Semmler" }]
 dependencies = [
     "numpy>=1.22",
-    "scipy>=1.9",
     "matplotlib>=3.5",
+    "jax>=0.4.31",
+    "jaxlib>=0.4.31",
+    "jaxtyping>=0.2.36",
 ]
 keywords = ["bayesian-nonparametrics", "slds", "hidden-markov-model", "time-series"]
 
@@ -26,6 +28,7 @@ dev = [
     "pytest>=7",
     "ruff>=0.6",
     "pre-commit>=3",
+    "beartype>=0.18",
     { include-group = "examples" },
 ]
 docs = [
@@ -38,16 +41,16 @@ docs = [
 default-groups = ["dev"]
 
 [tool.setuptools.packages.find]
-include = ["model*", "slds*", "misc*", "data*", "debug*", "test_runner*"]
+include = ["slds*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
 
 [tool.ruff]
-target-version = "py39"
+target-version = "py311"
 line-length = 100
-src = ["model", "slds", "misc", "data", "debug", "test_runner", "examples", "tests"]
+src = ["slds", "examples", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "UP", "B"]
@@ -55,6 +58,10 @@ ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["B011"]
+# jaxtyping shape strings are symbolic dimensions, not Python names.
+# UP037 strips the quotes from a one-letter shape, F722 rejects the space
+# in "T K", and F821 then treats those letters as undefined names.
+"slds/*" = ["UP037", "F722", "F821"]
 # Examples insert the repo root on sys.path before importing the package
 # so `python examples/...` works without an editable install.
 "examples/*" = ["E402"]

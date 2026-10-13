@@ -40,13 +40,11 @@ _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from examples.sp500_forecast import fit_garch_student, load_closes
-from examples.volatility_forecast import DATASETS
+from examples.market_data import DATASETS, fit_garch_student, load_closes
 
 # Fixed before any holdout score was read.
 HORIZONS = (1, 5, 20, 60)
 N_REGIMES = 3
-SELF_STAY = 0.98
 PRIOR_ALPHA = 1.0
 PRIOR_KAPPA = 97.0
 LAG = 22
@@ -55,15 +53,10 @@ REFIT_YEARS = 4
 REFIT_EVERY = 21
 SWEEPS = 2000
 CHAINS = 4
-PATHS = 25
 FORECAST_DRAWS = 40
 MIN_REGIME_WEIGHT = 30.0
 SEED = 23
 EWMA_LAMBDA = 0.94
-RADIUS_LIMIT = 0.999
-SLOPE_PRIOR_SD = 0.25
-INTERCEPT_PRIOR_SD = 1.0
-VARIANCE_PRIOR_A = 2.0
 _IMG_DIR = _ROOT / "docs" / "img"
 
 
@@ -356,434 +349,6 @@ def garch_log_forecasts(
     return forecasts, failures
 
 
-def _stationary_distribution(transition: np.ndarray) -> np.ndarray:
-    regimes = transition.shape[0]
-    values, vectors = np.linalg.eig(transition.T)
-    slot = int(np.argmin(np.abs(values - 1.0)))
-    weights = np.real(vectors[:, slot])
-    weights = np.maximum(weights, 0.0)
-    total = float(weights.sum())
-    if total <= 0.0:
-        return np.full(regimes, 1.0 / regimes)
-    return weights / total
-
-
-def _complete_loglik(
-    series: np.ndarray,
-    features: np.ndarray,
-    states: np.ndarray,
-    coef: np.ndarray,
-    sigma: np.ndarray,
-    transition: np.ndarray,
-) -> float:
-    regimes = sigma.shape[0]
-    mean = coef[states] + features @ coef[regimes:]
-    variance = np.maximum(sigma[states] ** 2, 1e-12)
-    loglik = -0.5 * np.sum((series - mean) ** 2 / variance + np.log(2.0 * np.pi * variance))
-    if states.size > 1:
-        loglik += np.sum(np.log(transition[states[:-1], states[1:]] + 1e-300))
-    return float(loglik)
-
-
-def _sample_coefficients(
-    series: np.ndarray,
-    features: np.ndarray,
-    states: np.ndarray,
-    sigma: np.ndarray,
-    prior_mean: np.ndarray,
-    prior_var: np.ndarray,
-    rng: np.random.Generator,
-    previous: np.ndarray,
-) -> tuple[np.ndarray, bool]:
-    regimes = sigma.shape[0]
-    design = np.empty((series.size, regimes + 3), dtype=np.float64)
-    for regime in range(regimes):
-        design[:, regime] = (states == regime).astype(np.float64)
-    design[:, regimes:] = features
-    scale = 1.0 / np.maximum(sigma[states], 1e-6)
-    weighted_x = design * scale[:, None]
-    weighted_y = series * scale
-    precision = np.diag(1.0 / prior_var)
-    precision = precision + weighted_x.T @ weighted_x
-    precision = 0.5 * (precision + precision.T) + np.eye(precision.shape[0]) * 1e-8
-    try:
-        chol = np.linalg.cholesky(precision)
-    except np.linalg.LinAlgError:
-        return previous, False
-    rhs = np.diag(1.0 / prior_var) @ prior_mean + weighted_x.T @ weighted_y
-    mean = np.linalg.solve(precision, rhs)
-    for _attempt in range(40):
-        draw = mean + np.linalg.solve(chol.T, rng.normal(size=mean.size))
-        if har_spectral_radius(draw[regimes:]) < RADIUS_LIMIT:
-            return draw, True
-    return previous, False
-
-
-def _sample_sigma(
-    series: np.ndarray,
-    features: np.ndarray,
-    states: np.ndarray,
-    coef: np.ndarray,
-    rng: np.random.Generator,
-    prior_a: float,
-    prior_b: float,
-) -> np.ndarray:
-    regimes = int(coef.size - 3)
-    residual = series - coef[states] - features @ coef[regimes:]
-    sigma = np.empty(regimes, dtype=np.float64)
-    for regime in range(regimes):
-        mask = states == regime
-        rss = float(np.sum(residual[mask] ** 2)) if np.any(mask) else 0.0
-        shape = prior_a + 0.5 * float(mask.sum())
-        rate = prior_b + 0.5 * rss
-        sigma[regime] = np.sqrt(rate / rng.gamma(shape))
-    return np.maximum(sigma, 1e-4)
-
-
-def _sample_transition(
-    states: np.ndarray,
-    rng: np.random.Generator,
-    alpha: float,
-    kappa: float,
-    regimes: int,
-) -> np.ndarray:
-    counts = np.zeros((regimes, regimes), dtype=np.float64)
-    if states.size > 1:
-        np.add.at(counts, (states[:-1], states[1:]), 1.0)
-    transition = np.empty((regimes, regimes), dtype=np.float64)
-    base = np.full(regimes, alpha, dtype=np.float64)
-    for regime in range(regimes):
-        concentration = base.copy()
-        concentration[regime] += kappa
-        concentration += counts[regime]
-        transition[regime] = rng.dirichlet(concentration)
-    return transition
-
-
-def _order_regimes(
-    coef: np.ndarray,
-    sigma: np.ndarray,
-    transition: np.ndarray,
-    states: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    regimes = sigma.shape[0]
-    order = np.argsort(coef[:regimes], kind="mergesort")
-    if np.array_equal(order, np.arange(regimes)):
-        return coef, sigma, transition, states
-    ordered = np.empty_like(coef)
-    ordered[:regimes] = coef[order]
-    ordered[regimes:] = coef[regimes:]
-    inverse = np.empty(regimes, dtype=np.int64)
-    inverse[order] = np.arange(regimes)
-    return ordered, sigma[order], transition[np.ix_(order, order)], inverse[states]
-
-
-def _initial_coefficients(
-    series: np.ndarray, features: np.ndarray, regimes: int, rng: np.random.Generator
-) -> np.ndarray:
-    usable = np.isfinite(features).all(axis=1)
-    design = np.column_stack((np.ones(int(usable.sum())), features[usable]))
-    beta = _ols_fit(design, series[usable])
-    slopes = beta[1:].copy()
-    for _shrink in range(30):
-        if har_spectral_radius(slopes) < RADIUS_LIMIT:
-            break
-        slopes *= 0.8
-    else:
-        slopes[:] = 0.0
-    residual = series[usable] - design @ np.concatenate(([beta[0]], slopes))
-    spread = float(np.std(residual)) if residual.size else 1.0
-    offsets = np.linspace(-0.75, 0.75, regimes) * max(spread, 1e-3)
-    offsets = offsets + rng.normal(0.0, 0.05, size=regimes)
-    coef = np.concatenate((np.full(regimes, beta[0]) + offsets, slopes))
-    return coef
-
-
-def fit_gibbs(
-    series: np.ndarray,
-    features: np.ndarray,
-    *,
-    regimes: int,
-    sweeps: int,
-    chains: int,
-    seed: int,
-    alpha: float = PRIOR_ALPHA,
-    kappa: float = PRIOR_KAPPA,
-) -> dict[str, np.ndarray]:
-    """Gibbs sampler for the sticky regime HAR.
-
-    Each chain samples states with forward-filtering backward-sampling,
-    then the shared slopes and regime intercepts, the regime scales, and
-    the sticky transition rows. Draws that make the HAR companion radius
-    at least 0.999 are rejected. Regimes are ordered by intercept after
-    every sweep so the stored draws can be compared across chains.
-
-    Args:
-        series: Daily log variance on the training window.
-        features: HAR features aligned with ``series``.
-        regimes: Number of regimes.
-        sweeps: Sweeps per chain, including burn-in.
-        chains: Independent chains.
-        seed: Seed for the chain-specific generators.
-        alpha: Off-diagonal Dirichlet concentration.
-        kappa: Extra diagonal Dirichlet concentration.
-
-    Returns:
-        Retained second-half draws and the complete-data log likelihood
-        of every sweep.
-    """
-
-    usable = np.isfinite(features).all(axis=1) & np.isfinite(series)
-    observed = np.asarray(series[usable], dtype=np.float64)
-    design = np.asarray(features[usable], dtype=np.float64)
-    if observed.size < LAG + 10:
-        raise ValueError("Training window is too short for the regime HAR.")
-    burn = sweeps // 2
-    keep = sweeps - burn
-    streams = np.random.SeedSequence(seed).spawn(chains)
-    loglik = np.empty((chains, sweeps), dtype=np.float64)
-    kept_coef = np.empty((chains, keep, regimes + 3), dtype=np.float64)
-    kept_sigma = np.empty((chains, keep, regimes), dtype=np.float64)
-    kept_trans = np.empty((chains, keep, regimes, regimes), dtype=np.float64)
-    kept_occupancy = np.empty((chains, keep, regimes), dtype=np.float64)
-    accepted = 0
-    attempts = 0
-    prior_var = np.concatenate(
-        (
-            np.full(regimes, INTERCEPT_PRIOR_SD**2),
-            np.full(3, SLOPE_PRIOR_SD**2),
-        )
-    )
-    for chain, stream in enumerate(streams):
-        rng = np.random.default_rng(stream)
-        coef = _initial_coefficients(observed, design, regimes, rng)
-        residual_scale = float(np.std(observed - design @ coef[regimes:] - coef[0]))
-        residual_scale = max(residual_scale, 1e-3)
-        sigma = np.full(regimes, residual_scale, dtype=np.float64)
-        off = (1.0 - SELF_STAY) / float(regimes - 1)
-        transition = np.full((regimes, regimes), off, dtype=np.float64)
-        np.fill_diagonal(transition, SELF_STAY)
-        states = np.zeros(observed.size, dtype=np.int64)
-        prior_mean = np.concatenate((np.full(regimes, coef[:regimes].mean()), coef[regimes:]))
-        prior_b = (VARIANCE_PRIOR_A - 1.0) * residual_scale**2
-        for sweep in range(sweeps):
-            filtered = _filter_one(observed, design, coef, sigma, transition)
-            states = _backward_sample(filtered, transition, rng)
-            coef, took = _sample_coefficients(
-                observed, design, states, sigma, prior_mean, prior_var, rng, coef
-            )
-            accepted += int(took)
-            attempts += 1
-            sigma = _sample_sigma(observed, design, states, coef, rng, VARIANCE_PRIOR_A, prior_b)
-            transition = _sample_transition(states, rng, alpha, kappa, regimes)
-            coef, sigma, transition, states = _order_regimes(coef, sigma, transition, states)
-            loglik[chain, sweep] = _complete_loglik(
-                observed, design, states, coef, sigma, transition
-            )
-            if sweep >= burn:
-                slot = sweep - burn
-                kept_coef[chain, slot] = coef
-                kept_sigma[chain, slot] = sigma
-                kept_trans[chain, slot] = transition
-                for regime in range(regimes):
-                    kept_occupancy[chain, slot, regime] = float(np.mean(states == regime))
-    draws = _stack_draws(kept_coef, kept_sigma, kept_trans)
-    return {
-        "coef": draws["coef"],
-        "sigma": draws["sigma"],
-        "trans": draws["trans"],
-        "c": draws["c"],
-        "beta": draws["beta"],
-        "loglik": loglik,
-        "occupancy": kept_occupancy,
-        "acceptance": np.array([accepted / max(attempts, 1)]),
-        "rhat": _rhat_parameters(kept_coef, kept_sigma, kept_trans),
-    }
-
-
-def _stack_draws(
-    coef: np.ndarray,
-    sigma: np.ndarray,
-    transition: np.ndarray,
-) -> dict[str, np.ndarray]:
-    flat_coef = coef.reshape(-1, coef.shape[-1])
-    flat_sigma = sigma.reshape(-1, sigma.shape[-1])
-    flat_trans = transition.reshape(-1, transition.shape[-2], transition.shape[-1])
-    regimes = flat_sigma.shape[1]
-    return {
-        "coef": flat_coef,
-        "sigma": flat_sigma,
-        "trans": flat_trans,
-        "c": flat_coef[:, :regimes],
-        "beta": flat_coef[:, regimes:],
-    }
-
-
-def _rhat_parameters(coef: np.ndarray, sigma: np.ndarray, transition: np.ndarray) -> np.ndarray:
-    """Gelman-Rubin R-hat for ordered intercepts, slopes, scales, and self-stays."""
-
-    regimes = sigma.shape[-1]
-    self_stay = np.diagonal(transition, axis1=-2, axis2=-1)
-    pieces = (coef[..., :regimes], coef[..., regimes:], sigma, self_stay)
-    values = []
-    for piece in pieces:
-        # piece shape (chains, keep, dim)
-        for dim in range(piece.shape[-1]):
-            values.append(_rhat(piece[:, :, dim]))
-    return np.asarray(values, dtype=np.float64)
-
-
-def _rhat(chains: np.ndarray) -> float:
-    """Split-chain-free R-hat. ``chains`` has shape ``(m, n)``."""
-
-    chain_count, length = chains.shape
-    if chain_count < 2 or length < 2:
-        return float("nan")
-    chain_mean = chains.mean(axis=1)
-    chain_var = chains.var(axis=1, ddof=1)
-    between = float(length * chain_mean.var(ddof=1))
-    within = float(chain_var.mean())
-    if within <= 0.0:
-        return 1.0 if between <= 0.0 else float("inf")
-    var_hat = (length - 1) / float(length) * within + between / float(length)
-    return float(np.sqrt(var_hat / within))
-
-
-def _filter_one(
-    series: np.ndarray,
-    features: np.ndarray,
-    coef: np.ndarray,
-    sigma: np.ndarray,
-    transition: np.ndarray,
-) -> np.ndarray:
-    """One-draw filter. Same recursion as ``filter_draws``, without its overhead."""
-
-    regimes = int(sigma.size)
-    signal = features @ coef[regimes:]
-    residual = series[:, None] - signal[:, None] - coef[:regimes]
-    log_emit = (
-        -0.5 * (residual / np.maximum(sigma, 1e-8)) ** 2
-        - np.log(np.maximum(sigma, 1e-8))
-        - 0.5 * np.log(2.0 * np.pi)
-    )
-    return _forward_filter(log_emit, transition, _stationary_distribution(transition))
-
-
-def _forward_filter(
-    log_emit: np.ndarray, transition: np.ndarray, initial: np.ndarray
-) -> np.ndarray:
-    """Forward filter with a scalar inner loop. ``log_emit`` is ``(time, regimes)``."""
-
-    length, regimes = log_emit.shape
-    out = np.empty((length, regimes), dtype=np.float64)
-    emissions = log_emit.tolist()
-    rows = transition.tolist()
-    alpha = [float(value) for value in initial]
-    uniform = 1.0 / float(regimes)
-    for time_index in range(length):
-        if time_index:
-            nxt = [0.0] * regimes
-            for origin, weight in enumerate(alpha):
-                if weight == 0.0:
-                    continue
-                row = rows[origin]
-                for dest in range(regimes):
-                    nxt[dest] += weight * row[dest]
-            alpha = nxt
-        emission = emissions[time_index]
-        peak = -1e300
-        scores = [0.0] * regimes
-        for regime in range(regimes):
-            score = math.log(alpha[regime] if alpha[regime] > 1e-300 else 1e-300) + emission[regime]
-            scores[regime] = score
-            if score > peak:
-                peak = score
-        total = 0.0
-        scaled = [0.0] * regimes
-        for regime, score in enumerate(scores):
-            value = math.exp(score - peak)
-            scaled[regime] = value
-            total += value
-        if total <= 0.0 or not math.isfinite(total):
-            alpha = [uniform] * regimes
-        else:
-            alpha = [value / total for value in scaled]
-        out[time_index] = alpha
-    return out
-
-
-def _backward_sample(
-    filtered: np.ndarray,
-    transition: np.ndarray,
-    rng: np.random.Generator,
-) -> np.ndarray:
-    length, regimes = filtered.shape
-    states = np.empty(length, dtype=np.int64)
-    draws = rng.random(length)
-    probabilities = filtered.tolist()
-    rows = transition.tolist()
-    states[-1] = _categorical(probabilities[-1], float(draws[-1]))
-    for time_index in range(length - 2, -1, -1):
-        nxt = int(states[time_index + 1])
-        belief = probabilities[time_index]
-        weights = [belief[regime] * rows[regime][nxt] for regime in range(regimes)]
-        states[time_index] = _categorical(weights, float(draws[time_index]))
-    return states
-
-
-def _categorical(weights: list[float], draw: float) -> int:
-    total = 0.0
-    for weight in weights:
-        if weight > 0.0:
-            total += weight
-    last = len(weights) - 1
-    if total <= 0.0 or not math.isfinite(total):
-        return min(int(draw * len(weights)), last)
-    threshold = draw * total
-    accumulated = 0.0
-    for regime, weight in enumerate(weights):
-        if weight > 0.0:
-            accumulated += weight
-        if accumulated >= threshold:
-            return regime
-    return last
-
-
-def filter_draws(
-    series: np.ndarray, features: np.ndarray, draws: dict[str, np.ndarray]
-) -> np.ndarray:
-    """Filtered regime probabilities for every draw.
-
-    Args:
-        series: Log variance observations.
-        features: HAR features aligned with ``series``.
-        draws: ``c``, ``beta``, ``sigma``, and ``trans`` arrays, one row per draw.
-
-    Returns:
-        Array of shape ``(T, draws, regimes)``. Row ``t`` conditions on
-        observations through ``t``.
-    """
-
-    draw_count, regimes = draws["c"].shape
-    length = series.size
-    alpha = np.stack([_stationary_distribution(draws["trans"][i]) for i in range(draw_count)])
-    log_sigma = np.log(np.maximum(draws["sigma"], 1e-8))
-    out = np.empty((length, draw_count, regimes), dtype=np.float64)
-    for time_index in range(length):
-        if time_index:
-            alpha = np.einsum("ni,nik->nk", alpha, draws["trans"])
-        signal = features[time_index] @ draws["beta"].T
-        residual = series[time_index] - signal[:, None] - draws["c"]
-        log_emit = -0.5 * (residual / draws["sigma"]) ** 2 - log_sigma - 0.5 * np.log(2.0 * np.pi)
-        log_post = np.log(np.maximum(alpha, 1e-300)) + log_emit
-        log_post -= log_post.max(axis=1, keepdims=True)
-        post = np.exp(log_post)
-        post /= np.maximum(post.sum(axis=1, keepdims=True), 1e-300)
-        alpha = post
-        out[time_index] = post
-    return out
-
-
 def propagated_regime_weights(
     probability: np.ndarray, transition: np.ndarray, horizon: int
 ) -> np.ndarray:
@@ -901,55 +466,6 @@ def training_bias(
     return (raw[usable] - np.asarray(actual, dtype=np.float64)[usable, None]).mean(axis=0)
 
 
-def simulate_log_mean_square(
-    probability: np.ndarray,
-    history: np.ndarray,
-    draws: dict[str, np.ndarray],
-    horizon: int,
-    paths: int,
-    rng: np.random.Generator,
-) -> float:
-    """Previous path forecast of ``log(mean r^2)``.
-
-    Kept so the earlier simulated-path scores can be reproduced. The rolling
-    evaluation no longer calls it. Each path draws a regime and a Gaussian
-    log variance, then converts the draw back with ``exp``.
-    """
-
-    draw_count = probability.shape[0]
-    total = draw_count * paths
-    repeat = np.repeat(np.arange(draw_count), paths)
-    weights = np.asarray(probability[repeat], dtype=np.float64)
-    intercept = draws["c"][repeat]
-    slopes = draws["beta"][repeat]
-    sigma = draws["sigma"][repeat]
-    transition = draws["trans"][repeat]
-    hist = np.repeat(history[None, :], total, axis=0)
-    squares = np.empty((total, horizon), dtype=np.float64)
-    regimes = probability.shape[1]
-    for step in range(horizon):
-        weights = np.einsum("ni,nik->nk", weights, transition)
-        weights = weights / np.maximum(weights.sum(axis=1, keepdims=True), 1e-300)
-        cdf = np.cumsum(weights, axis=1)
-        cdf[:, -1] = 1.0
-        state = (rng.random(total)[:, None] > cdf).sum(axis=1)
-        state = np.clip(state, 0, regimes - 1)
-        column = np.arange(total)
-        mean = (
-            intercept[column, state]
-            + slopes[:, 0] * hist[:, -1]
-            + slopes[:, 1] * np.mean(hist[:, -WEEK:], axis=1)
-            + slopes[:, 2] * np.mean(hist[:, -LAG:], axis=1)
-        )
-        draw = mean + sigma[column, state] * rng.normal(size=total)
-        squares[:, step] = np.exp(np.clip(draw, -80.0, 40.0))
-        hist[:, :-1] = hist[:, 1:]
-        hist[:, -1] = draw
-        weights = np.zeros_like(weights)
-        weights[column, state] = 1.0
-    return float(np.mean(np.log(np.maximum(squares.mean(axis=1), 1e-300))))
-
-
 def _score_block(
     actual: np.ndarray,
     forecasts: dict[str, np.ndarray],
@@ -991,7 +507,6 @@ def evaluate_returns(
     sweeps: int = SWEEPS,
     chains: int = CHAINS,
     refit_every: int = REFIT_EVERY,
-    paths: int = PATHS,
     seed: int = SEED,
     horizons: tuple[int, ...] = HORIZONS,
     regimes: int = N_REGIMES,
@@ -1009,8 +524,6 @@ def evaluate_returns(
         sweeps: Gibbs sweeps per chain.
         chains: Number of chains.
         refit_every: Origins between refits.
-        paths: Unused by the direct forecast. Retained so older calls
-            still parse; the previous simulated forecast used this count.
         seed: Master seed.
         horizons: Forecast horizons, in days.
         regimes: Number of sticky regimes.
@@ -1019,7 +532,7 @@ def evaluate_returns(
 
     Returns:
         RMSE, mean squared error, bias, Diebold-Mariano tests, sampler
-        diagnostics, and the forecast paths.
+        diagnostics, and the direct forecasts.
     """
 
     values = np.asarray(returns, dtype=np.float64)
@@ -1054,7 +567,6 @@ def evaluate_returns(
         sweeps=sweeps,
         chains=chains,
         refit_every=refit_every,
-        paths=paths,
         seed=seed,
         horizons=horizons,
         regimes=regimes,
@@ -1082,7 +594,6 @@ def evaluate_returns(
     diagnostics["sweeps"] = int(sweeps)
     diagnostics["chains"] = int(chains)
     diagnostics["refit_every"] = int(refit_every)
-    diagnostics["paths"] = int(paths)
     diagnostics["seed"] = int(seed)
     diagnostics["regimes"] = int(regimes)
     diagnostics["self_stay_prior"] = float(expected_self_stay(PRIOR_ALPHA, PRIOR_KAPPA, regimes))
@@ -1108,7 +619,7 @@ def _max_finite(values: np.ndarray) -> float:
 
 
 def _thin_draws(fit: dict[str, np.ndarray], limit: int) -> dict[str, np.ndarray]:
-    """Evenly thin each chain's retained draws before the forecast simulation."""
+    """Evenly thin each chain's retained draws before the forecast filter."""
 
     chains = int(fit["loglik"].shape[0])
     total = int(fit["c"].shape[0])
@@ -1127,6 +638,74 @@ def _thin_draws(fit: dict[str, np.ndarray], limit: int) -> dict[str, np.ndarray]
     return thinned
 
 
+def _jax_window_fits(
+    returns: np.ndarray,
+    boundaries: list[int],
+    origins: np.ndarray,
+    train_days: int,
+    sweeps: int,
+    chains: int,
+    seed: int,
+    regimes: int,
+) -> list[dict[str, np.ndarray]]:
+    """Fit every refit window with one vmapped JAX Gibbs run.
+
+    Windows are exactly ``train_days`` long, so they stack. Each window
+    uses its own log-variance floor, the smallest positive square in
+    ``returns[:left]``. The forecast filter is the jitted local recursion
+    in ``filter_regime_draws``.
+
+    Args:
+        returns: Daily log returns.
+        boundaries: First origin of each refit block.
+        origins: Every holdout origin.
+        train_days: Trailing length of each window.
+        sweeps: Sweeps per chain, including burn-in.
+        chains: Chains per window.
+        seed: Seed for the JAX key.
+        regimes: Number of regimes.
+
+    Returns:
+        One second-half draw dictionary per boundary.
+    """
+
+    import jax
+    import jax.numpy as jnp
+    from jax import random
+    from slds.regime_har import pack_regime_draws, sample_regime_windows
+
+    chunks_y = []
+    chunks_x = []
+    for left in boundaries:
+        start = max(LAG, left - train_days)
+        floor = positive_floor(returns[:left])
+        log_var = log_squares(returns[:left], floor)
+        features = feature_matrix(log_var)
+        window_y = np.asarray(log_var[start:left], dtype=np.float64)
+        window_x = np.asarray(features[start:left], dtype=np.float64)
+        usable = np.isfinite(window_y) & np.isfinite(window_x).all(axis=1)
+        chunks_y.append(window_y[usable])
+        chunks_x.append(window_x[usable])
+    lengths = {chunk.shape[0] for chunk in chunks_y}
+    if len(lengths) != 1:
+        raise ValueError(f"JAX refit windows are not equal length: {sorted(lengths)}")
+    draws = sample_regime_windows(
+        random.PRNGKey(seed),
+        jnp.asarray(np.stack(chunks_y)),
+        jnp.asarray(np.stack(chunks_x)),
+        regimes,
+        chains,
+        sweeps,
+    )
+    packed = jax.tree_util.tree_map(np.asarray, draws)
+    fits = []
+    for index in range(len(chunks_y)):
+        window = jax.tree_util.tree_map(lambda array, i=index: array[i], packed)
+        fits.append(pack_regime_draws(window, sweeps=sweeps, regimes=regimes))
+    del origins
+    return fits
+
+
 def _regime_forecasts(
     returns: np.ndarray,
     origins: np.ndarray,
@@ -1135,7 +714,6 @@ def _regime_forecasts(
     sweeps: int,
     chains: int,
     refit_every: int,
-    paths: int,
     seed: int,
     horizons: tuple[int, ...],
     regimes: int,
@@ -1157,9 +735,14 @@ def _regime_forecasts(
         else:
             origin_dates = dates[origins - 1]
     boundaries = list(range(int(origins[0]), int(origins[-1]) + 1, refit_every))
+    jax_fits = _jax_window_fits(
+        returns, boundaries, origins, train_days, sweeps, chains, seed, regimes
+    )
     refit_stats = []
     first_loglik = None
-    rng = np.random.default_rng(seed)
+    import jax.numpy as jnp
+    from slds.hmm import filter_regime_draws
+
     columns = {
         horizon: {
             int(origin): slot for slot, origin in enumerate(origins[origins + horizon <= count])
@@ -1176,19 +759,21 @@ def _regime_forecasts(
         log_var = log_squares(returns[:right], floor)
         features = feature_matrix(log_var)
         start = max(LAG, left - train_days)
-        fit = fit_gibbs(
-            log_var[start:left],
-            features[start:left],
-            regimes=regimes,
-            sweeps=sweeps,
-            chains=chains,
-            seed=int(rng.integers(0, 2**31 - 1)),
-        )
+        fit = jax_fits[block_index]
         if first_loglik is None:
             first_loglik = fit["loglik"]
         refit_stats.append(_summarize_fit(fit, left, start))
         forecast_fit = _thin_draws(fit, FORECAST_DRAWS)
-        filtered = filter_draws(log_var[start:right], features[start:right], forecast_fit)
+        filtered = np.asarray(
+            filter_regime_draws(
+                jnp.asarray(log_var[start:right], dtype=jnp.float64),
+                jnp.asarray(features[start:right], dtype=jnp.float64),
+                jnp.asarray(forecast_fit["c"], dtype=jnp.float64),
+                jnp.asarray(forecast_fit["beta"], dtype=jnp.float64),
+                jnp.asarray(forecast_fit["sigma"], dtype=jnp.float64),
+                jnp.asarray(forecast_fit["trans"], dtype=jnp.float64),
+            )
+        )
         print(
             f"refit origin {left} window {left - start} draws {fit['c'].shape[0]} "
             f"forecast_draws {forecast_fit['c'].shape[0]} "
@@ -1223,7 +808,6 @@ def _regime_forecasts(
         "rhat_max": _max_finite(np.array([item["rhat_max"] for item in refit_stats])),
         "loglik_first": first_loglik,
         "forecast": "direct",
-        "paths": int(paths),
     }
     return forecasts, diagnostics, probabilities, origin_dates
 
@@ -1421,7 +1005,7 @@ def _plot_horizon(name: str, asset_name: str, result: dict[str, object], destina
     fig, ax = plt.subplots(figsize=(8.2, 4.4))
     width = 0.15
     positions = np.arange(len(horizons), dtype=np.float64)
-    for offset, (model, color) in enumerate(zip(models, colors)):
+    for offset, (model, color) in enumerate(zip(models, colors, strict=True)):
         heights = []
         for horizon in horizons:
             if model not in result["scores"][horizon]:
@@ -1491,7 +1075,9 @@ def _plot_convergence(
 
 
 def run_dataset(
-    name: str, sweeps: int | None = None, chains: int | None = None
+    name: str,
+    sweeps: int | None = None,
+    chains: int | None = None,
 ) -> dict[str, object]:
     """Fit one named dataset and write its figures and scores."""
 

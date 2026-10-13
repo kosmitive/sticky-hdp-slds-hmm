@@ -16,6 +16,7 @@ theme:
 nav:
   - Results: results.md
   - Volatility: volatility.md
+  - Inference: inference.md
   - Overview: index.md
   - Install and usage: install.md
   - API: api.md

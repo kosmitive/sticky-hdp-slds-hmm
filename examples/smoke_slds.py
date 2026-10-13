@@ -1,8 +1,6 @@
-"""Run a few Gibbs sweeps of the sticky HDP-SLDS on a small synthetic series.
+"""Three blocked Gibbs sweeps on a tiny two-mode system.
 
-The script is the short path from install to a finite posterior sample:
-
-    python examples/smoke_slds.py
+python examples/smoke_slds.py
 """
 
 from __future__ import annotations
@@ -16,88 +14,79 @@ _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from model.mniw_prior import MNIWPrior
-from model.sticky_hdp_prior import StickyHDPPrior
-from model.sticky_hdp_slds_hmm import StickyHDPSLDSHMMModel
+from jax import random  # noqa: E402
+from slds.slds import sample_slds  # noqa: E402
+from slds.types import SLDSData, SLDSPrior, SLDSState  # noqa: E402
 
 
-def run_smoke(steps: int = 3, seed: int = 0) -> dict[str, object]:
-    """Simulate a two-mode system and run ``steps`` full Gibbs sweeps.
+def run_smoke(sweeps: int = 3) -> dict[str, np.ndarray]:
+    """Run a short blocked chain and return the final state as NumPy arrays."""
 
-    Args:
-        steps: Number of Gibbs sweeps.
-        seed: Seed for NumPy's legacy random generator, which the sampler uses.
+    import jax.numpy as jnp
 
-    Returns:
-        Shapes and a few posterior summaries from the last sweep.
-    """
-
-    np.random.seed(seed)
-    latent_dim = 2
-    mode_count = 2
-    trace_count = 2
-    step_count = 12
-    projection = np.eye(latent_dim)
-    hdp_prior = StickyHDPPrior(mode_count, [2.0, 0.5], [8.0, 2.0], [2.0, 0.5], "uniform")
-    dynamics_prior = MNIWPrior(
-        0.6 * np.eye(latent_dim),
-        20.0 * np.eye(latent_dim),
-        8,
-        0.05 * np.eye(latent_dim),
+    observations = jnp.asarray(np.random.default_rng(0).normal(size=(2, 12, 2)))
+    eye = jnp.eye(2)
+    state = SLDSState(
+        modes=jnp.zeros((2, 12), dtype=jnp.int32),
+        latents=observations,
+        dynamics=jnp.stack([0.5 * eye, 0.2 * eye]),
+        process_cov=jnp.stack([0.2 * eye, 0.3 * eye]),
+        emission_cov=0.1 * eye,
+        beta=jnp.array([0.6, 0.4]),
+        transition=jnp.array([[0.9, 0.1], [0.2, 0.8]]),
+        alpha_plus_kappa=jnp.asarray(8.0),
+        rho=jnp.asarray(0.75),
+        gamma=jnp.asarray(1.5),
+        column_precision=jnp.ones((2, 2)),
     )
-    model = StickyHDPSLDSHMMModel(
-        latent_dim,
-        latent_dim,
-        hdp_prior,
-        dynamics_prior,
-        0.05 * np.eye(latent_dim),
-        [6.0, 0.05 * np.eye(latent_dim)],
-        projection,
+    prior = SLDSPrior(
+        alpha_kappa=jnp.array([2.0, 1.0]),
+        rho=jnp.array([8.0, 2.0]),
+        gamma=jnp.array([2.0, 1.0]),
+        dynamics_mean=0.4 * eye,
+        dynamics_column_precision=eye,
+        dynamics_df=jnp.asarray(8.0),
+        dynamics_scale=0.2 * eye,
+        latent_prior=eye,
+        emission_df=jnp.asarray(6.0),
+        emission_scale=0.2 * eye,
+        emission=eye,
+        ard=jnp.array([1.0, 1.0]),
     )
-    model.init_params()
-    model.dynamics.A[:] = 0.6 * np.eye(latent_dim)
-    model.dynamics.Sigma[:] = 0.05 * np.eye(latent_dim)
-    model.R = 0.05 * np.eye(latent_dim)
-    model.hdp.beta = np.full(mode_count, 1.0 / mode_count)
-    model.hdp.pi = np.array([[0.9, 0.1], [0.15, 0.85]])
-    model.simulate(trace_count, step_count, init=False)
+    trace, loglik = sample_slds(
+        random.PRNGKey(1), state, SLDSData(observations=observations), prior, sweeps
+    )
+    loglik.block_until_ready()
+    final = jax_tree_last(trace)
+    final["log_joint"] = np.asarray(loglik)
+    return final
 
-    for _ in range(steps):
-        model.gibbs_step()
-    log_likelihood = float(model.calc_log_likelihood())
-    rho = float(model.hdp.rho)
 
-    # A separate sticky check: a run of one mode must put mass on its diagonal.
-    model.z = np.zeros((trace_count, step_count), dtype=np.int64)
-    model.hdp.alpha_plus_kappa = 2.0
-    model.hdp.rho = 0.5
-    model.hdp.beta = np.full(mode_count, 0.5)
-    model.calc_transitions()
-    model.sample_post_hdp_pi()
+def jax_tree_last(trace) -> dict[str, np.ndarray]:
+    """Last sweep of a stacked state, as NumPy arrays."""
 
     return {
-        "log_likelihood": log_likelihood,
-        "x_shape": tuple(model.x.shape),
-        "y_shape": tuple(model.y.shape),
-        "w_shape": tuple(model.w.shape),
-        "pi_row_sums": model.hdp.pi.sum(axis=1).copy(),
-        "rho": rho,
-        "sticky_diagonal": float(model.hdp.pi[0, 0]),
+        "modes": np.asarray(trace.modes[-1]),
+        "latents": np.asarray(trace.latents[-1]),
+        "dynamics": np.asarray(trace.dynamics[-1]),
+        "transition": np.asarray(trace.transition[-1]),
+        "rho": np.asarray(trace.rho[-1]),
+        "emission_cov": np.asarray(trace.emission_cov[-1]),
     }
 
 
 def main() -> None:
-    """Print a one-screen summary of a smoke run."""
+    """Print a finite log joint and a sticky transition row."""
 
-    report = run_smoke()
-    print("sticky HDP-SLDS smoke run")
-    print(f"  log likelihood     {report['log_likelihood']:.3f}")
-    print(f"  latent shape       {report['x_shape']}")
-    print(f"  observation shape  {report['y_shape']}")
-    print(f"  emission noise     {report['w_shape']}")
-    print(f"  pi row sums        {np.array2string(report['pi_row_sums'], precision=3)}")
-    print(f"  rho                {report['rho']:.3f}")
-    print(f"  sticky diagonal    {report['sticky_diagonal']:.3f}")
+    result = run_smoke()
+    rows = result["transition"].sum(axis=1)
+    print(f"log_joint {result['log_joint'][-1]:.2f}")
+    print(f"latents {result['latents'].shape} observations-aligned")
+    print(f"transition_rows {rows}")
+    print(f"rho {float(result['rho']):.3f}")
+    assert np.all(np.isfinite(result["log_joint"]))
+    assert np.allclose(rows, 1.0, atol=1e-6)
+    assert 0.0 < float(result["rho"]) < 1.0
 
 
 if __name__ == "__main__":

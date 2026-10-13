@@ -16,7 +16,6 @@ predictive mean and a central 90% band.
 from __future__ import annotations
 
 import sys
-import time
 from pathlib import Path
 
 import matplotlib
@@ -35,9 +34,8 @@ from examples.pendulum_demo import (
     RELEASE_ANGLES,
     SEED,
     STEP_COUNT,
-    build_model,
     continue_pendulum,
-    gibbs_sweep,
+    fit,
     simulate_pendulum,
 )
 
@@ -125,57 +123,38 @@ def fit_and_forecast(sweeps: int, horizon: int) -> dict[str, np.ndarray]:
 
     training = simulate_pendulum(SEED)
     held_out = continue_pendulum(training["state"], horizon, HOLDOUT_SEED)
-    np.random.seed(SEED)
-    model = build_model(training["observations"])
+    history = fit(training["observations"], sweeps)
     half = sweeps // 2
-    log_joint = np.empty(sweeps)
-    used_modes = np.empty(sweeps, dtype=np.int64)
-    latent_sum = np.zeros_like(model.x)
-    snapshots: list[dict[str, np.ndarray]] = []
-    started = time.perf_counter()
-    for sweep in range(sweeps):
-        gibbs_sweep(model)
-        log_joint[sweep] = model.calc_log_likelihood()
-        used_modes[sweep] = np.unique(model.z).size
-        if sweep >= half:
-            # Copies only. Forecast draws happen after the chain so they do
-            # not consume the sampler's random stream.
-            latent_sum += model.x
-            snapshots.append(
-                {
-                    "x_last": np.array(model.x[:, -1], copy=True),
-                    "z_last": np.array(model.z[:, -1], copy=True),
-                    "A": np.array(model.dynamics.A, copy=True),
-                    "Sigma": np.array(model.dynamics.Sigma, copy=True),
-                    "pi": np.array(model.hdp.pi, copy=True),
-                    "R": np.array(model.R, copy=True),
-                    "C": np.array(model.C, copy=True),
-                }
-            )
-        if sweep == 0 or (sweep + 1) % 25 == 0 or sweep + 1 == sweeps:
-            print(
-                f"sweep {sweep + 1:4d}/{sweeps}  "
-                f"log_joint {log_joint[sweep]:12.2f}  "
-                f"modes {used_modes[sweep]}  "
-                f"elapsed {time.perf_counter() - started:.1f}s",
-                flush=True,
-            )
     failures = [0]
-    futures = np.empty((len(snapshots), training["observations"].shape[0], horizon, model.od))
-    for index, snapshot in enumerate(snapshots):
-        futures[index] = roll_forward(snapshot, horizon, failures)
-    elapsed = time.perf_counter() - started
+    futures = []
+    np.random.seed(SEED + 7)
+    for sweep in range(half, sweeps):
+        futures.append(
+            roll_forward(
+                {
+                    "x_last": history["latents"][sweep, :, -1],
+                    "z_last": history["modes"][sweep, :, -1],
+                    "A": history["dynamics"][sweep],
+                    "Sigma": history["process_cov"][sweep],
+                    "pi": history["transition"][sweep],
+                    "R": history["emission_cov"][sweep],
+                    "C": history["prior_emission"],
+                },
+                horizon,
+                failures,
+            )
+        )
     return {
         "time_train": training["time"],
         "state_train": training["state"],
         "observations_train": training["observations"],
         "state_hold": held_out["state"],
         "observations_hold": held_out["observations"],
-        "posterior_mean": latent_sum / float(sweeps - half),
-        "futures": futures,
-        "log_joint": log_joint,
-        "used_modes": used_modes,
-        "elapsed_sec": np.array(elapsed),
+        "posterior_mean": np.mean(history["latents"][half:], axis=0),
+        "futures": np.stack(futures),
+        "log_joint": history["log_joint"],
+        "used_modes": history["used_modes"],
+        "elapsed_sec": history["elapsed_sec"],
         "gaussian_jitter_draws": np.array(failures[0]),
     }
 

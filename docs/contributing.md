@@ -17,6 +17,6 @@ uv run pytest
 uv run mkdocs build --strict
 ```
 
-Continuous integration runs ruff and pytest on Python 3.9 and Python 3.13, and runs the pre-commit hooks on the whole tree. Documentation is built on every pull request. Pushes to `master` also publish the site with GitHub Pages.
+Continuous integration runs ruff and pytest on Python 3.11 and Python 3.13, and runs the pre-commit hooks on the whole tree. Documentation is built on every pull request. Pushes to `master` also publish the site with GitHub Pages.
 
 The site is configured for `https://kosmitive.github.io/sticky-hdp-slds-hmm/`. The repository owner sets that source once under Settings, Pages, Source: GitHub Actions.

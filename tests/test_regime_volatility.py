@@ -3,21 +3,19 @@
 from __future__ import annotations
 
 import numpy as np
-from examples.regime_volatility import (
+
+from sticky_hdp_slds import evaluate_returns, filter_regime_draws, fit_regime_har
+from sticky_hdp_slds.volatility import (
     LAG,
     PRIOR_ALPHA,
     PRIOR_KAPPA,
-    _direct_forecast_block,
     diebold_mariano,
     direct_har_forecasts,
-    evaluate_returns,
-    expected_self_stay,
     feature_matrix,
-    filter_draws,
     fit_direct_regime_coefficients,
-    fit_gibbs,
     forward_square_mean,
     garch_log_forecasts,
+    garch_variance_leads,
     har_spectral_radius,
     log_squares,
     mixture_log_forecast,
@@ -25,7 +23,8 @@ from examples.regime_volatility import (
     propagated_regime_weights,
     training_bias,
 )
-from examples.sp500_forecast import garch_variance_leads
+from sticky_hdp_slds.volatility.scoring import _direct_forecast_block
+from sticky_hdp_slds.volatility.series import expected_self_stay
 
 
 def test_prior_self_stay_is_near_98_percent() -> None:
@@ -86,15 +85,20 @@ def test_diebold_mariano_sign_matches_the_loss_gap() -> None:
 
 
 def test_filter_locks_onto_the_closer_regime() -> None:
+    import jax.numpy as jnp
+
     series = np.concatenate((np.zeros(40), np.full(40, 4.0)))
     features = np.zeros((series.size, 3))
-    draws = {
-        "c": np.array([[0.0, 4.0]]),
-        "beta": np.zeros((1, 3)),
-        "sigma": np.array([[0.2, 0.2]]),
-        "trans": np.array([[[0.95, 0.05], [0.05, 0.95]]]),
-    }
-    probs = filter_draws(series, features, draws)
+    probs = np.asarray(
+        filter_regime_draws(
+            jnp.asarray(series),
+            jnp.asarray(features),
+            jnp.asarray([[0.0, 4.0]]),
+            jnp.zeros((1, 3)),
+            jnp.asarray([[0.2, 0.2]]),
+            jnp.asarray([[[0.95, 0.05], [0.05, 0.95]]]),
+        )
+    )
     assert np.allclose(probs.sum(axis=2), 1.0)
     assert probs[20, 0, 0] > 0.9
     assert probs[70, 0, 1] > 0.9
@@ -114,7 +118,7 @@ def test_gibbs_draws_stay_stationary_and_ordered() -> None:
         level = -1.5 if latent[time_index] == 0 else 1.5
         series[time_index] = level + 0.15 * series[time_index - 1] + noise[time_index]
     features = feature_matrix(series)
-    fit = fit_gibbs(series, features, regimes=2, sweeps=40, chains=2, seed=9)
+    fit = fit_regime_har(series, features, regimes=2, sweeps=40, chains=2, seed=9)
     assert fit["c"].shape[1] == 2
     assert np.all(fit["c"][:, 0] <= fit["c"][:, 1] + 1e-8)
     assert har_spectral_radius(fit["beta"].mean(axis=0)) < 1.0
@@ -132,7 +136,6 @@ def test_origin_forecast_ignores_later_returns() -> None:
         "sweeps": 8,
         "chains": 1,
         "refit_every": 36,
-        "paths": 2,
         "seed": 11,
         "horizons": (1, 5),
         "regimes": 2,

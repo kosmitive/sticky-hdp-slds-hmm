@@ -9,8 +9,8 @@ Observations are the angle and the angular velocity, plus Gaussian noise.
 The emission matrix is the identity. Hyperparameters below are for this
 series; a different length or noise level needs its own prior scales.
 
-    python examples/pendulum_demo.py
-    python examples/pendulum_demo.py 40
+    uv run python -m examples.pendulum_demo
+    uv run python -m examples.pendulum_demo 40
 """
 
 from __future__ import annotations
@@ -26,15 +26,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 _ROOT = Path(__file__).resolve().parents[1]
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
 
-from model.mniw_prior import MNIWPrior
-from model.sticky_hdp_prior import StickyHDPPrior
-from model.sticky_hdp_slds_hmm import StickyHDPSLDSHMMModel
-
-# Reproducible streams. The series uses a Generator; the sampler uses NumPy's
-# global generator, which is reseeded after the series is built.
+# The series uses a Generator. The Gibbs sampler uses a JAX key with the same seed.
 SEED = 11
 TRACE_COUNT = 4
 STEP_COUNT = 160
@@ -125,100 +118,100 @@ def small_angle_dynamics() -> np.ndarray:
     )
 
 
-def build_model(observations: np.ndarray) -> StickyHDPSLDSHMMModel:
-    """Construct a truncated sticky HDP-SLDS and attach the observations.
+def _slds_prior_and_state(observations: np.ndarray):
+    """Prior means and an observation-initialized state for the blocked sampler."""
+
+    import jax.numpy as jnp
+
+    from sticky_hdp_slds import SLDSData, SLDSPrior, SLDSState
+
+    latent_dim = 2
+    mean_dynamics = jnp.asarray(small_angle_dynamics(), dtype=jnp.float64)
+    dynamics = jnp.broadcast_to(mean_dynamics, (TRUNCATION, latent_dim, latent_dim))
+    beta = jnp.full(TRUNCATION, 1.0 / TRUNCATION)
+    stay = 0.92
+    transition = (1.0 - stay) * beta + stay * jnp.eye(TRUNCATION)
+    observations_j = jnp.asarray(observations, dtype=jnp.float64)
+    state = SLDSState(
+        modes=jnp.zeros(observations_j.shape[:2], dtype=jnp.int32),
+        latents=observations_j,
+        dynamics=dynamics,
+        process_cov=jnp.broadcast_to(
+            0.15 * jnp.eye(latent_dim), (TRUNCATION, latent_dim, latent_dim)
+        ),
+        emission_cov=jnp.diag(jnp.asarray(OBSERVATION_STD, dtype=jnp.float64) ** 2),
+        beta=beta,
+        transition=transition,
+        alpha_plus_kappa=jnp.asarray(12.0),
+        rho=jnp.asarray(stay),
+        gamma=jnp.asarray(1.5),
+        column_precision=jnp.full((TRUNCATION, latent_dim), 40.0),
+    )
+    prior = SLDSPrior(
+        alpha_kappa=jnp.asarray([12.0, 1.0]),
+        rho=jnp.asarray([24.0, 2.0]),
+        gamma=jnp.asarray([3.0, 2.0]),
+        dynamics_mean=mean_dynamics,
+        dynamics_column_precision=40.0 * jnp.eye(latent_dim),
+        dynamics_df=jnp.asarray(8.0),
+        dynamics_scale=0.15 * jnp.eye(latent_dim),
+        latent_prior=jnp.diag(jnp.asarray([2.0, 16.0])),
+        emission_df=jnp.asarray(6.0),
+        emission_scale=jnp.diag(jnp.asarray(OBSERVATION_STD, dtype=jnp.float64) ** 2) * 3.0,
+        emission=jnp.eye(latent_dim),
+        ard=jnp.ones(latent_dim),
+    )
+    return state, SLDSData(observations=observations_j), prior
+
+
+def fit(observations: np.ndarray, sweeps: int) -> dict[str, np.ndarray]:
+    """Run ``sweeps`` blocked Gibbs iterations and keep the monitored traces.
 
     Args:
         observations: Noisy pendulum series, shape ``(traces, steps, 2)``.
-
-    Returns:
-        A model with parameters drawn from the prior and latents initialized
-        at the observations. The first Gibbs sweep resamples both.
-    """
-
-    latent_dim = 2
-    mean_dynamics = small_angle_dynamics()
-    # Column precision keeps the initial maps near the small-angle pendulum.
-    # The regression Gram matrix from a full trace still dominates ``K``.
-    dynamics_prior = MNIWPrior(
-        mean_dynamics,
-        40.0 * np.eye(latent_dim),
-        8,
-        0.15 * np.eye(latent_dim),
-    )
-    # Mean alpha+kappa = 12, mean rho = 0.92, mean gamma = 1.5.
-    hdp_prior = StickyHDPPrior(
-        TRUNCATION,
-        [12.0, 1.0],
-        [24.0, 2.0],
-        [3.0, 2.0],
-        "uniform",
-    )
-    # Inverse-Wishart mean of R is about diag(0.04**2, 0.12**2).
-    emission_scale = np.diag(OBSERVATION_STD**2) * 3.0
-    model = StickyHDPSLDSHMMModel(
-        latent_dim,
-        latent_dim,
-        hdp_prior,
-        dynamics_prior,
-        np.diag([2.0, 16.0]),
-        [6.0, emission_scale],
-        np.eye(latent_dim),
-    )
-    model.init_params()
-    model.y = np.array(observations, dtype=np.float64, copy=True)
-    model.x = np.array(observations, dtype=np.float64, copy=True)
-    model.slds_init_z()
-    return model
-
-
-def gibbs_sweep(model: StickyHDPSLDSHMMModel) -> None:
-    """One full sweep. The model owns the update order."""
-
-    model.gibbs_step()
-
-
-def fit(model: StickyHDPSLDSHMMModel, sweeps: int) -> dict[str, np.ndarray]:
-    """Run ``sweeps`` Gibbs iterations and keep the monitored traces.
-
-    Args:
-        model: Initialized pendulum model.
         sweeps: Number of complete Gibbs sweeps.
 
     Returns:
-        Log joint, occupied-mode counts, ``rho``, and every latent sample.
+        Log joint, occupied-mode counts, ``rho``, latents, modes, and dynamics.
     """
 
-    log_joint = np.empty(sweeps)
-    used_modes = np.empty(sweeps, dtype=np.int64)
-    rho = np.empty(sweeps)
-    latents = np.empty((sweeps,) + model.x.shape)
-    modes = np.empty((sweeps,) + model.z.shape, dtype=np.int64)
+    from jax import random
+
+    from sticky_hdp_slds import sample_slds
+
+    state, data, prior = _slds_prior_and_state(observations)
     started = time.perf_counter()
-    for sweep in range(sweeps):
-        gibbs_sweep(model)
-        log_joint[sweep] = model.calc_log_likelihood()
-        used_modes[sweep] = np.unique(model.z).size
-        rho[sweep] = model.hdp.rho
-        latents[sweep] = model.x
-        modes[sweep] = model.z
-        if sweep == 0 or (sweep + 1) % 25 == 0 or sweep + 1 == sweeps:
-            elapsed = time.perf_counter() - started
-            print(
-                f"sweep {sweep + 1:4d}/{sweeps}  "
-                f"log_joint {log_joint[sweep]:12.2f}  "
-                f"modes {used_modes[sweep]}  "
-                f"rho {rho[sweep]:.3f}  "
-                f"elapsed {elapsed:.1f}s",
-                flush=True,
-            )
+    trace, loglik = sample_slds(
+        random.PRNGKey(SEED),
+        state,
+        data,
+        prior,
+        sweeps,
+        sequential_modes=False,
+        ard=False,
+    )
+    loglik.block_until_ready()
+    elapsed = time.perf_counter() - started
+    log_joint = np.asarray(loglik)
+    modes = np.asarray(trace.modes)
+    used_modes = np.array([np.unique(modes[sweep]).size for sweep in range(sweeps)])
+    print(
+        f"blocked sweeps {sweeps} in {elapsed:.1f}s  "
+        f"log_joint[0] {log_joint[0]:.2f}  log_joint[-1] {log_joint[-1]:.2f}",
+        flush=True,
+    )
     return {
         "log_joint": log_joint,
         "used_modes": used_modes,
-        "rho": rho,
-        "latents": latents,
+        "rho": np.asarray(trace.rho),
+        "latents": np.asarray(trace.latents),
         "modes": modes,
-        "elapsed_sec": np.array(time.perf_counter() - started),
+        "dynamics": np.asarray(trace.dynamics),
+        "elapsed_sec": np.array(elapsed),
+        "prior_emission": np.asarray(prior.emission),
+        "process_cov": np.asarray(trace.process_cov),
+        "transition": np.asarray(trace.transition),
+        "emission_cov": np.asarray(trace.emission_cov),
     }
 
 
@@ -350,7 +343,7 @@ def save_plots(
         modes = final_modes[trace_id]
         change = np.flatnonzero(np.diff(modes)) + 1
         bounds = np.concatenate(([0], change, [modes.size]))
-        for start, end in zip(bounds[:-1], bounds[1:]):
+        for start, end in zip(bounds[:-1], bounds[1:], strict=True):
             axis.axvspan(
                 time_axis[start] - 0.5 * DT,
                 time_axis[end - 1] + 0.5 * DT,
@@ -368,7 +361,6 @@ def save_plots(
 
 
 def _print_regime_diagnostic(
-    model: StickyHDPSLDSHMMModel,
     series: dict[str, np.ndarray],
     history: dict[str, np.ndarray],
 ) -> None:
@@ -407,7 +399,7 @@ def _print_regime_diagnostic(
             f"mean_abs_angle {float(np.mean(angle[mask])):.3f}  "
             f"mean_dwell {float(np.mean(dwells)):.2f}"
         )
-        print("   ", np.array2string(model.dynamics.A[mode], precision=3))
+        print("   ", np.array2string(history["dynamics"][-1, mode], precision=3))
 
 
 def main() -> None:
@@ -415,17 +407,15 @@ def main() -> None:
 
     sweeps = int(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_SWEEPS
     series = simulate_pendulum(SEED)
-    np.random.seed(SEED)
-    model = build_model(series["observations"])
     print(
         f"pendulum demo  seed {SEED}  traces {TRACE_COUNT}  "
         f"steps {STEP_COUNT}  dt {DT}  truncation {TRUNCATION}  sweeps {sweeps}",
         flush=True,
     )
-    history = fit(model, sweeps)
+    history = fit(series["observations"], sweeps)
     summary = convergence_summary(history["log_joint"], history["used_modes"])
     save_plots(series, history, _IMG_DIR)
-    _print_regime_diagnostic(model, series, history)
+    _print_regime_diagnostic(series, history)
     print("convergence")
     for key, value in summary.items():
         print(f"  {key:28s} {value}")

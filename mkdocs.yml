@@ -15,7 +15,11 @@ theme:
 
 nav:
   - Results: results.md
-  - Volatility: volatility.md
+  - Volatility:
+      - Protocol: volatility.md
+      - Bitcoin: bitcoin.md
+      - S&P 500: sp500.md
+  - Inference: inference.md
   - Overview: index.md
   - Install and usage: install.md
   - API: api.md
@@ -26,7 +30,7 @@ plugins:
   - mkdocstrings:
       handlers:
         python:
-          paths: ["."]
+          paths: ["src"]
           options:
             docstring_style: google
             show_root_heading: true

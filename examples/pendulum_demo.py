@@ -9,8 +9,8 @@ Observations are the angle and the angular velocity, plus Gaussian noise.
 The emission matrix is the identity. Hyperparameters below are for this
 series; a different length or noise level needs its own prior scales.
 
-    python examples/pendulum_demo.py
-    python examples/pendulum_demo.py 40
+    uv run python -m examples.pendulum_demo
+    uv run python -m examples.pendulum_demo 40
 """
 
 from __future__ import annotations
@@ -26,8 +26,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 _ROOT = Path(__file__).resolve().parents[1]
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
 
 # The series uses a Generator. The Gibbs sampler uses a JAX key with the same seed.
 SEED = 11
@@ -124,7 +122,8 @@ def _slds_prior_and_state(observations: np.ndarray):
     """Prior means and an observation-initialized state for the blocked sampler."""
 
     import jax.numpy as jnp
-    from slds.types import SLDSData, SLDSPrior, SLDSState
+
+    from sticky_hdp_slds import SLDSData, SLDSPrior, SLDSState
 
     latent_dim = 2
     mean_dynamics = jnp.asarray(small_angle_dynamics(), dtype=jnp.float64)
@@ -177,7 +176,8 @@ def fit(observations: np.ndarray, sweeps: int) -> dict[str, np.ndarray]:
     """
 
     from jax import random
-    from slds.slds import sample_slds
+
+    from sticky_hdp_slds import sample_slds
 
     state, data, prior = _slds_prior_and_state(observations)
     started = time.perf_counter()

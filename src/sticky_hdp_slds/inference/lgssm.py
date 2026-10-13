@@ -11,8 +11,8 @@ import jax.numpy as jnp
 from jax import lax, random
 from jaxtyping import Array, Float, Int, PRNGKeyArray
 
-from slds._dtype import enable_x64
-from slds.conjugate import sample_gaussian
+from sticky_hdp_slds._dtype import enable_x64
+from sticky_hdp_slds.inference.conjugate import sample_gaussian
 
 enable_x64()
 

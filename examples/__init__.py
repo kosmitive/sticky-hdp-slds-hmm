@@ -1,1 +1,1 @@
-"""Small runnable examples. Nothing here is imported by the sampler."""
+"""Runnable examples. The library lives in ``sticky_hdp_slds``."""

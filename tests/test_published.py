@@ -11,16 +11,13 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from examples.market_data import DATASETS, load_closes
 from examples.pendulum_forecast import fit_and_forecast, forecast_metrics
-from examples.regime_volatility import (
-    LAG,
-    evaluate_returns,
-    feature_matrix,
-    log_squares,
-    positive_floor,
-)
-from slds.regime_har import fit_regime_har
+
+from sticky_hdp_slds import evaluate_returns, fit_regime_har, load_closes
+from sticky_hdp_slds.volatility import LAG, datasets, feature_matrix, log_squares, positive_floor
+
+_DATA = Path(__file__).resolve().parents[1] / "examples" / "data"
+DATASETS = datasets(_DATA)
 
 _FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "published.json").read_text())
 _RMSE_ATOL = 0.005

@@ -2,22 +2,28 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
-from examples.market_data import (
-    BTC_PATH,
-    DATASETS,
-    SP500_PATH,
+
+from sticky_hdp_slds.volatility import (
+    datasets,
     fit_garch_student,
     garch_variance_leads,
     load_closes,
 )
+
+_DATA = Path(__file__).resolve().parents[1] / "examples" / "data"
+DATASETS = datasets(_DATA)
+SP500_PATH = _DATA / "sp500_daily.csv"
+BTC_PATH = _DATA / "btc_daily.csv"
 
 
 def test_sp500_snapshot_records_the_download_and_parses_offline() -> None:
     text = SP500_PATH.read_text()
     assert "downloaded: 2026-10-11" in text
     assert "^GSPC" in text
-    snapshot = load_closes()
+    snapshot = load_closes(SP500_PATH)
     assert snapshot["downloaded"] == "2026-10-11"
     closes = snapshot["closes"]
     assert closes.shape[0] == 9261

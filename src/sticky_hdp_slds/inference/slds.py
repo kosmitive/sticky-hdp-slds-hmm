@@ -21,11 +21,19 @@ import jax.numpy as jnp
 from jax import lax, random
 from jaxtyping import Array, Float, Int, PRNGKeyArray
 
-from slds._dtype import enable_x64
-from slds.conjugate import sample_gaussian, sample_invwishart, sample_matrix_normal
-from slds.hdp import update_hdp
-from slds.lgssm import backward_information, forward_information, sample_latents
-from slds.types import SLDSData, SLDSPrior, SLDSState
+from sticky_hdp_slds._dtype import enable_x64
+from sticky_hdp_slds.inference.conjugate import (
+    sample_gaussian,
+    sample_invwishart,
+    sample_matrix_normal,
+)
+from sticky_hdp_slds.inference.hdp import update_hdp
+from sticky_hdp_slds.inference.lgssm import (
+    backward_information,
+    forward_information,
+    sample_latents,
+)
+from sticky_hdp_slds.inference.types import SLDSData, SLDSPrior, SLDSState
 
 enable_x64()
 

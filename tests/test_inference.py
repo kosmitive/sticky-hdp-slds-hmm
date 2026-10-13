@@ -12,13 +12,14 @@ import pytest
 from beartype import beartype
 from jax import random
 from jaxtyping import TypeCheckError, jaxtyped
-from slds.conjugate import sample_gaussian, sample_invwishart
-from slds.hdp import sample_table_counts
-from slds.hmm import forward_filter, stationary_distribution
-from slds.lgssm import backward_information, forward_information
-from slds.slds import ard_normal_equations, regression_statistics, slds_sweep
-from slds.stability import distributed_lags, har_stable, schur_stable
-from slds.types import SLDSData, SLDSPrior, SLDSState
+
+from sticky_hdp_slds.inference.conjugate import sample_gaussian, sample_invwishart
+from sticky_hdp_slds.inference.hdp import sample_table_counts
+from sticky_hdp_slds.inference.hmm import forward_filter, stationary_distribution
+from sticky_hdp_slds.inference.lgssm import backward_information, forward_information
+from sticky_hdp_slds.inference.slds import ard_normal_equations, regression_statistics, slds_sweep
+from sticky_hdp_slds.inference.stability import distributed_lags, har_stable, schur_stable
+from sticky_hdp_slds.inference.types import SLDSData, SLDSPrior, SLDSState
 
 
 def np_to_jax(value):
@@ -136,7 +137,7 @@ def test_filter_matches_exact_enumeration() -> None:
 def test_backward_sample_matches_enumerated_path_on_a_forced_chain() -> None:
     """A point-mass filter locks the backward sample onto one path."""
 
-    from slds.hmm import backward_sample
+    from sticky_hdp_slds import backward_sample
 
     transition = np_to_jax(np.array([[0.5, 0.5], [0.5, 0.5]]))
     emissions = np_to_jax(np.array([[0.0, -40.0], [0.0, -40.0], [-40.0, 0.0]]))

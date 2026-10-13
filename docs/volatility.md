@@ -19,8 +19,8 @@ The "Simulated" column is the previous path forecast, kept for comparison and no
 Exact zero returns, five in the S&P file and one in the Bitcoin file, are replaced in `log(r^2)` by the smallest positive square in the estimation sample.
 
 ```bash
-uv run python examples/regime_volatility.py sp500
-uv run python examples/regime_volatility.py btc
+uv run python -m examples.regime_volatility sp500
+uv run python -m examples.regime_volatility btc
 ```
 
 Regime draws come from `sample_regime_windows`, and the forecast filter is `filter_regime_draws`. The baselines stay NumPy. An earlier NumPy Gibbs sampler on this same protocol took 312.5 s on the S&P 500 and 651.1 s on bitcoin. See the [inference](inference.md) page.

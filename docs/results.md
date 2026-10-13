@@ -3,7 +3,7 @@
 ## Forecast
 
 ```bash
-uv run python examples/pendulum_forecast.py
+uv run python -m examples.pendulum_forecast
 ```
 
 ![Fitted window, 90% forecast band, and held-out observations for the largest release](img/pendulum_forecast.png)
@@ -19,7 +19,7 @@ Angle and angular velocity coverage over the full horizon are 91.9% and 92.2%. T
 ## Fit
 
 ```bash
-uv run python examples/pendulum_demo.py
+uv run python -m examples.pendulum_demo
 ```
 
 The script integrates a nonlinear pendulum with the symplectic Euler method (`g/l = 9.81`) and fits the sticky HDP-SLDS. Four traces are released from rest at 0.45, 1.05, 1.70, and 2.35 rad. Each trace has 160 steps of `dt = 0.05` s. The observations are the angle and the angular velocity, with standard deviations 0.04 and 0.12, and the velocity also receives a process disturbance of standard deviation 0.01. The emission matrix is the identity, so piecewise-linear modes are asked to track the angle dependence of `sin(theta)`.

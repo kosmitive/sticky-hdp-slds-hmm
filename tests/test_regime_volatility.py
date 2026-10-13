@@ -3,20 +3,19 @@
 from __future__ import annotations
 
 import numpy as np
-from examples.market_data import garch_variance_leads
-from examples.regime_volatility import (
+
+from sticky_hdp_slds import evaluate_returns, filter_regime_draws, fit_regime_har
+from sticky_hdp_slds.volatility import (
     LAG,
     PRIOR_ALPHA,
     PRIOR_KAPPA,
-    _direct_forecast_block,
     diebold_mariano,
     direct_har_forecasts,
-    evaluate_returns,
-    expected_self_stay,
     feature_matrix,
     fit_direct_regime_coefficients,
     forward_square_mean,
     garch_log_forecasts,
+    garch_variance_leads,
     har_spectral_radius,
     log_squares,
     mixture_log_forecast,
@@ -24,8 +23,8 @@ from examples.regime_volatility import (
     propagated_regime_weights,
     training_bias,
 )
-from slds.hmm import filter_regime_draws
-from slds.regime_har import fit_regime_har
+from sticky_hdp_slds.volatility.scoring import _direct_forecast_block
+from sticky_hdp_slds.volatility.series import expected_self_stay
 
 
 def test_prior_self_stay_is_near_98_percent() -> None:

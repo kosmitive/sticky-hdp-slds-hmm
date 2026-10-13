@@ -69,11 +69,11 @@ The sweep used for the pendulum figures is the blocked sampler: latent states, t
 ```bash
 uv sync
 uv run pytest
-uv run python examples/smoke_slds.py
+uv run python -m examples.smoke_slds
 uv run pre-commit install
 ```
 
-`uv sync` installs the package and the `dev` group (pytest, ruff, pre-commit, and the `examples` group). The volatility scripts use `arch` from that examples group. Add the docs group when you want the site:
+`uv sync` installs `sticky_hdp_slds` and the `dev` group (pytest, ruff, pre-commit, and the `examples` group). The `examples` group provides `arch` and `matplotlib`, which are also the `volatility` and `plots` extras. Add the docs group when you want the site:
 
 ```bash
 uv sync --group docs
@@ -86,12 +86,11 @@ The smoke script builds a two-mode system in two latent dimensions, simulates tw
 
 | Path | Role |
 | --- | --- |
-| `slds/` | JAX Gibbs samplers for the regime HAR and the sticky HDP-SLDS |
+| `src/sticky_hdp_slds/` | Installable package: Gibbs samplers and the volatility study |
 | `examples/smoke_slds.py` | Short end-to-end run |
 | `examples/pendulum_demo.py` | Noisy pendulum fit, with the figures below |
 | `examples/pendulum_forecast.py` | 80-step forecast, the figures above |
 | `examples/regime_volatility.py` | Rolling-origin sticky regime HAR |
-| `examples/market_data.py` | Close files and the GARCH baseline |
 | `examples/data/` | S&P 500 and Bitcoin close snapshots |
 | `tests/` | Unit checks and stored-reference regressions |
 | `docs/` | This site's source |
@@ -101,7 +100,7 @@ The smoke script builds a two-mode system in two latent dimensions, simulates tw
 ### Noisy pendulum
 
 ```bash
-uv run python examples/pendulum_demo.py
+uv run python -m examples.pendulum_demo
 ```
 
 The script integrates a nonlinear pendulum with the symplectic Euler method (`g/l = 9.81`) and fits the sticky HDP-SLDS. Four traces are released from rest at 0.45, 1.05, 1.70, and 2.35 rad. Each trace has 160 steps of `dt = 0.05` s. The observations are the angle and the angular velocity, with standard deviations 0.04 and 0.12, and the velocity also receives a process disturbance of standard deviation 0.01. The emission matrix is the identity, so piecewise-linear modes are asked to track the angle dependence of `sin(theta)`.
@@ -121,7 +120,7 @@ The last sample splits the swing into two sticky regimes. The mode whose mean ab
 ### Forecast
 
 ```bash
-uv run python examples/pendulum_forecast.py
+uv run python -m examples.pendulum_forecast
 ```
 
 The forecast uses the same training series, seed, and hyperparameters as the fit. Eighty further steps are integrated with continuation seed 12 and are never shown to the sampler. The chain is 300 blocked sweeps and the sampler took 6.8 s. Sweeps 151–300 each contribute one future. The headline scores and both figures are at the top of this page.

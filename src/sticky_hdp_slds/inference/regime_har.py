@@ -16,10 +16,10 @@ import numpy as np
 from jax import random
 from jaxtyping import Array, Float, Int, PRNGKeyArray
 
-from slds._dtype import enable_x64
-from slds.hmm import complete_loglik, filter_and_sample
-from slds.stability import har_stable
-from slds.types import RegimeData, RegimeDraw, RegimePrior, RegimeState
+from sticky_hdp_slds._dtype import enable_x64
+from sticky_hdp_slds.inference.hmm import complete_loglik, filter_and_sample
+from sticky_hdp_slds.inference.stability import har_stable
+from sticky_hdp_slds.inference.types import RegimeData, RegimeDraw, RegimePrior, RegimeState
 
 enable_x64()
 

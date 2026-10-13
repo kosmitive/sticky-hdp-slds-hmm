@@ -2155,15 +2155,23 @@ dependencies = [
     { name = "jaxlib", version = "0.10.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "jaxlib", version = "0.11.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "jaxtyping" },
-    { name = "matplotlib" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+]
+
+[package.optional-dependencies]
+plots = [
+    { name = "matplotlib" },
+]
+volatility = [
+    { name = "arch" },
 ]
 
 [package.dev-dependencies]
 dev = [
     { name = "arch" },
     { name = "beartype" },
+    { name = "matplotlib" },
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "ruff" },
@@ -2175,21 +2183,25 @@ docs = [
 ]
 examples = [
     { name = "arch" },
+    { name = "matplotlib" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "arch", marker = "extra == 'volatility'", specifier = ">=5.3" },
     { name = "jax", specifier = ">=0.4.31" },
     { name = "jaxlib", specifier = ">=0.4.31" },
     { name = "jaxtyping", specifier = ">=0.2.36" },
-    { name = "matplotlib", specifier = ">=3.5" },
+    { name = "matplotlib", marker = "extra == 'plots'", specifier = ">=3.5" },
     { name = "numpy", specifier = ">=1.22" },
 ]
+provides-extras = ["volatility", "plots"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "arch", specifier = ">=5.3" },
     { name = "beartype", specifier = ">=0.18" },
+    { name = "matplotlib", specifier = ">=3.5" },
     { name = "pre-commit", specifier = ">=3" },
     { name = "pytest", specifier = ">=7" },
     { name = "ruff", specifier = ">=0.6" },
@@ -2199,7 +2211,10 @@ docs = [
     { name = "mkdocs-material", specifier = ">=9.5" },
     { name = "mkdocstrings", extras = ["python"], specifier = ">=0.26" },
 ]
-examples = [{ name = "arch", specifier = ">=5.3" }]
+examples = [
+    { name = "arch", specifier = ">=5.3" },
+    { name = "matplotlib", specifier = ">=3.5" },
+]
 
 [[package]]
 name = "typing-extensions"

@@ -10,7 +10,7 @@ that sweep's sampled terminal state, terminal mode, dynamics, sticky
 transition matrix, and emission covariance. The draws are aggregated into a
 predictive mean and a central 90% band.
 
-    python examples/pendulum_forecast.py
+    uv run python -m examples.pendulum_forecast
 """
 
 from __future__ import annotations
@@ -23,10 +23,6 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-
-_ROOT = Path(__file__).resolve().parents[1]
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
 
 from examples.pendulum_demo import (
     DEFAULT_SWEEPS,
@@ -42,7 +38,7 @@ from examples.pendulum_demo import (
 HOLDOUT_SEED = SEED + 1
 HORIZON = 80
 SHORT_HORIZON = 10
-_IMG_DIR = _ROOT / "docs" / "img"
+_IMG_DIR = Path(__file__).resolve().parents[1] / "docs" / "img"
 _GAUSSIAN_JITTER = 1e-10
 
 

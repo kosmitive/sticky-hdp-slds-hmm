@@ -11,7 +11,7 @@ from __future__ import annotations
 import jax.numpy as jnp
 from jaxtyping import Array, Bool, Float
 
-from slds._dtype import enable_x64
+from sticky_hdp_slds._dtype import enable_x64
 
 enable_x64()
 

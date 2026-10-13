@@ -15,6 +15,7 @@ Run the same checks by hand:
 uv run pre-commit run --all-files
 uv run pytest
 uv run mkdocs build --strict
+uv build
 ```
 
 Continuous integration runs ruff and pytest on Python 3.11 and Python 3.13, and runs the pre-commit hooks on the whole tree. Documentation is built on every pull request. Pushes to `master` also publish the site with GitHub Pages.

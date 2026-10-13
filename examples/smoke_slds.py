@@ -1,22 +1,14 @@
 """Three blocked Gibbs sweeps on a tiny two-mode system.
 
-python examples/smoke_slds.py
+uv run python -m examples.smoke_slds
 """
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import numpy as np
+from jax import random
 
-_ROOT = Path(__file__).resolve().parents[1]
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
-
-from jax import random  # noqa: E402
-from slds.slds import sample_slds  # noqa: E402
-from slds.types import SLDSData, SLDSPrior, SLDSState  # noqa: E402
+from sticky_hdp_slds import SLDSData, SLDSPrior, SLDSState, sample_slds
 
 
 def run_smoke(sweeps: int = 3) -> dict[str, np.ndarray]:

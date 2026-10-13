@@ -15,8 +15,8 @@ import jax.numpy as jnp
 from jax import random
 from jaxtyping import Array, Float, Int, PRNGKeyArray
 
-from slds._dtype import enable_x64
-from slds.types import SLDSPrior, SLDSState
+from sticky_hdp_slds._dtype import enable_x64
+from sticky_hdp_slds.inference.types import SLDSPrior, SLDSState
 
 enable_x64()
 
